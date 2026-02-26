@@ -1,0 +1,130 @@
+{
+  "projects_by_stage": {
+    "input": {"intent": "projects_by_stage"},
+    "min_rows": 5,
+    "spot_checks": {
+      "Seed": {"field": "Project_Status", "count_field": "ProjectCount", "min": 20, "max": 100},
+      "Root": {"field": "Project_Status", "count_field": "ProjectCount", "min": 15, "max": 70},
+      "Ground": {"field": "Project_Status", "count_field": "ProjectCount", "min": 3, "max": 30},
+      "Plant": {"field": "Project_Status", "count_field": "ProjectCount", "min": 30, "max": 120}
+    }
+  },
+  "projects_by_age": {
+    "input": {"intent": "projects_by_age"},
+    "min_rows": 30,
+    "top_field": "DaysActive",
+    "top_min": 200
+  },
+  "projects_stuck": {
+    "input": {"intent": "projects_stuck"},
+    "min_rows": 30,
+    "top_field": "DaysStuck",
+    "top_min": 200
+  },
+  "projects_by_pic": {
+    "input": {"intent": "projects_by_pic"},
+    "min_rows": 35,
+    "banned_pic_values": ["XXX", "NONE", "66", "25", "64"]
+  },
+  "projects_by_customer": {
+    "input": {"intent": "projects_by_customer"},
+    "min_rows": 35,
+    "required_columns": ["client_Name"]
+  },
+  "projects_lifecycle": {
+    "input": {"intent": "projects_lifecycle"},
+    "exact_rows": 1,
+    "field_ranges": {
+      "AvgDays": {"min": 20, "max": 200},
+      "Fastest": {"min": 1, "max": 30},
+      "ProjectsIncluded": {"min": 25, "max": 120}
+    }
+  },
+  "invoices_pending": {
+    "input": {"intent": "invoices_pending"},
+    "exact_rows": 1,
+    "required_columns": ["InvoicedPending", "UnbilledPending", "TotalOutstanding"],
+    "positive_fields": ["TotalOutstanding"]
+  },
+  "invoices_this_month": {
+    "input": {"intent": "invoices_this_month"},
+    "exact_rows": 1,
+    "non_negative_fields": ["TotalInvoiced"]
+  },
+  "invoice_aging": {
+    "input": {"intent": "invoice_aging"},
+    "min_rows": 1,
+    "max_rows": 4,
+    "must_contain_bucket": "90+ days"
+  },
+  "payment_summary": {
+    "input": {"intent": "payment_summary"},
+    "exact_rows": 1,
+    "non_negative_fields": ["TotalReceived", "TotalTDS"]
+  },
+  "amc_status_summary": {
+    "input": {"intent": "amc_status_summary"},
+    "min_rows": 3,
+    "spot_checks": {
+      "Awaiting PO": {"field": "Status", "count_field": "Count", "min": 40, "max": 200},
+      "Under AMC": {"field": "Status", "count_field": "Count", "min": 25, "max": 120}
+    }
+  },
+  "amc_expiry": {
+    "input": {"intent": "amc_expiry"},
+    "days_remaining_range": {"field": "DaysRemaining", "min": 0, "max": 60}
+  },
+  "amc_by_customer": {
+    "input": {"intent": "amc_by_customer", "CUSTOMER_NAME": "HANIL"},
+    "min_rows": 2,
+    "max_rows": 15
+  },
+  "amc_revenue": {
+    "input": {"intent": "amc_revenue"},
+    "min_rows": 3,
+    "required_columns": ["AMC_Amount"]
+  },
+  "ops_status": {
+    "input": {"intent": "ops_status"},
+    "min_rows": 3,
+    "spot_checks": {
+      "COC": {"field": "Status", "count_field": "Count", "min": 25, "max": 120}
+    }
+  },
+  "ops_active": {
+    "input": {"intent": "ops_active"},
+    "min_rows": 10,
+    "banned_status_values": ["COC"]
+  },
+  "ops_by_customer": {
+    "input": {"intent": "ops_by_customer", "CUSTOMER_CODE": "IGS"},
+    "min_rows": 1
+  },
+  "monthly_target": {
+    "input": {"intent": "monthly_target"},
+    "min_rows": 6
+  },
+  "tickets_open": {
+    "input": {"intent": "tickets_open"},
+    "min_rows": 3
+  },
+  "tickets_by_person": {
+    "input": {"intent": "tickets_by_person"},
+    "min_rows": 3,
+    "required_columns": ["OpenTickets", "ResolvedTickets"]
+  },
+  "_retired_projects_overdue": {
+    "input": {"intent": "projects_overdue"},
+    "expect_redirect_from": "projects_overdue",
+    "expect_redirect_to": "projects_by_age"
+  },
+  "_retired_ops_overdue": {
+    "input": {"intent": "ops_overdue"},
+    "expect_redirect_from": "ops_overdue",
+    "expect_redirect_to": "ops_active"
+  },
+  "_unknown_intent": {
+    "input": {"intent": "weather_forecast"},
+    "expect_fallback": true
+  }
+}

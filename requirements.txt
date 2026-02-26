@@ -1,4 +1,6 @@
-flask
+fastapi
+uvicorn
+jinja2
 pyodbc
 anthropic
 python-dotenv

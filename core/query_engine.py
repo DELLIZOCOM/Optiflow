@@ -165,6 +165,38 @@ def _bind_params(sql, intent_dict, defaults):
     return bound_sql, tuple(param_values), params_used
 
 
+def _run_meta(intent_name, definition):
+    """Run a meta-intent by executing its sub-intents and bundling results."""
+    sub_intents = definition.get("sub_intents", [])
+    results = {}
+    errors = []
+
+    for sub_name in sub_intents:
+        try:
+            result = run({"intent": sub_name})
+            results[sub_name] = result
+            if result.get("error"):
+                errors.append(f"{sub_name}: {result['error']}")
+        except Exception as e:
+            logger.error(f"Meta sub-intent '{sub_name}' failed: {e}")
+            errors.append(f"{sub_name}: {e}")
+            results[sub_name] = {
+                "rows": [], "intent_name": sub_name,
+                "params_used": {}, "caveats": [], "error": str(e),
+            }
+
+    return {
+        "rows": [],
+        "intent_name": intent_name,
+        "params_used": {},
+        "caveats": [],
+        "redirected_from": None,
+        "error": "; ".join(errors) if errors else None,
+        "meta": True,
+        "sub_results": results,
+    }
+
+
 def run(intent_dict):
     """Execute a parsed intent and return raw results.
 
@@ -175,6 +207,7 @@ def run(intent_dict):
     Returns:
         dict with keys: rows, intent_name, params_used, caveats,
                         redirected_from, error, and optionally fallback/message/suggestions.
+        For meta-intents, also includes meta=True and sub_results dict.
     """
     intent_name = intent_dict.get("intent")
     if not intent_name:
@@ -183,6 +216,10 @@ def run(intent_dict):
     definition = INTENT_REGISTRY.get(intent_name)
     if not definition:
         return _build_fallback()
+
+    # Handle meta-intents (e.g. business_health)
+    if definition.get("meta"):
+        return _run_meta(intent_name, definition)
 
     # Handle retired intents
     redirected_from = None

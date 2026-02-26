@@ -172,12 +172,10 @@
 </div>
 
 <div class="chat-area" id="chatArea">
-  <div class="msg msg-ai">
-    <div class="msg-text">Hello! I can help you with BizFlow data — projects, invoices, AMC contracts, operations, and tickets. Ask me anything or pick a question below.</div>
-  </div>
 </div>
 
 <div class="chips" id="chips">
+  <div class="chip" onclick="sendQuestion('How is the business doing?')">Business overview</div>
   <div class="chip" onclick="sendQuestion('Pipeline breakdown?')">Pipeline breakdown?</div>
   <div class="chip" onclick="sendQuestion('Pending invoices?')">Pending invoices?</div>
   <div class="chip" onclick="sendQuestion('AMC expiring soon?')">AMC expiring soon?</div>
@@ -273,7 +271,24 @@ function sendFromInput() {
   sendQuestion(input.value);
 }
 
-input.focus();
+// Fetch welcome message on page load
+(async function loadWelcome() {
+  showLoading();
+  try {
+    const res = await fetch('/welcome');
+    const data = await res.json();
+    hideLoading();
+    const meta = data.time_ms != null ? data.time_ms + 'ms' : '';
+    addMessage(data.message, 'ai', meta);
+  } catch (err) {
+    hideLoading();
+    addMessage(
+      'Hello! I can help you with BizFlow data — projects, invoices, AMC contracts, operations, and tickets. Ask me anything or pick a question below.',
+      'ai'
+    );
+  }
+  input.focus();
+})();
 </script>
 </body>
 </html>

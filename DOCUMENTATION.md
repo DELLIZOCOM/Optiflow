@@ -585,10 +585,10 @@ pip install -r requirements.txt
 # 3. Set up .env file (see above)
 
 # 4. Run the server
-uvicorn app:app --port 5000
+uvicorn app:app --port 8000
 
 # 5. Open browser
-# http://127.0.0.1:5000
+# http://127.0.0.1:8000
 ```
 
 ### macOS ODBC Driver Installation

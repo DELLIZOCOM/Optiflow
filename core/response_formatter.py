@@ -1125,18 +1125,23 @@ def format_welcome(sub_results):
         )
 
     # Build message
+    _agent_line = (
+        "I can also answer custom questions about your data — "
+        "I'll show you my work before running anything."
+    )
+
     if items:
         body = "\n".join(f"  {item}" for item in items)
         return (
             f"{greeting}! Here's what needs your attention today:\n\n"
             f"{body}\n\n"
-            f"What would you like to dig into?"
+            f"What would you like to dig into?\n\n{_agent_line}"
         )
     else:
         return (
             f"{greeting}! Everything looks good today — no urgent items. "
             f"Ask me anything about projects, invoices, AMC, operations, "
-            f"or tickets."
+            f"or tickets.\n\n{_agent_line}"
         )
 
 

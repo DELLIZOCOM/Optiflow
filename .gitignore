@@ -1,4 +1,15 @@
+# Secrets and credentials
 .env
+config/users.json
+
+# Sensitive logs
+logs/audit.jsonl
+logs/audit.jsonl.*
+logs/approved_queries.jsonl
+
+# Python
 __pycache__/
 *.pyc
+
+# OS
 .DS_Store

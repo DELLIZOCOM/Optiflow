@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OptiFlow AI — Login</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f2f5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .header {
+      background: #1a1a2e;
+      color: #fff;
+      padding: 16px 24px;
+    }
+    .header h1 { font-size: 20px; font-weight: 600; }
+    .header p  { font-size: 13px; color: #8a8fb5; margin-top: 2px; }
+
+    .page {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 24px;
+    }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 14px;
+      padding: 36px 40px;
+      width: 100%;
+      max-width: 420px;
+      animation: fadeIn 0.2s ease;
+    }
+
+    .card-title {
+      font-size: 22px;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 6px;
+    }
+    .card-subtitle {
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 28px;
+    }
+
+    .form-group {
+      margin-bottom: 18px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #444;
+      margin-bottom: 6px;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 11px 14px;
+      border: 1px solid #d0d0d0;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      background: #fafafa;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .form-group input:focus {
+      border-color: #1a1a2e;
+      background: #fff;
+    }
+
+    .error-msg {
+      background: #ffe3e3;
+      color: #c92a2a;
+      border: 1px solid #ffb3b3;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      margin-bottom: 18px;
+      display: none;
+    }
+    .error-msg.show { display: block; }
+
+    .expired-msg {
+      background: #fff3bf;
+      color: #966a00;
+      border: 1px solid #ffe066;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      margin-bottom: 18px;
+    }
+
+    .btn-login {
+      width: 100%;
+      padding: 12px;
+      background: #1a1a2e;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+      margin-top: 4px;
+    }
+    .btn-login:hover    { background: #16213e; }
+    .btn-login:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @media (max-width: 480px) {
+      .card { padding: 28px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>OptiFlow AI</h1>
+    <p>Database intelligence for your business</p>
+  </div>
+
+  <div class="page">
+    <div class="card">
+      <div class="card-title">Sign in</div>
+      <div class="card-subtitle">Enter your credentials to access OptiFlow AI</div>
+
+      {% if expired %}
+      <div class="expired-msg">Session expired — please sign in again.</div>
+      {% endif %}
+
+      <div class="error-msg" id="error-msg">Invalid username or password.</div>
+
+      <form id="login-form" onsubmit="doLogin(event)">
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" autocomplete="username"
+                 placeholder="admin" required autofocus>
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" autocomplete="current-password"
+                 placeholder="••••••••" required>
+        </div>
+
+        <button type="submit" class="btn-login" id="btn-login">Sign in</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+async function doLogin(e) {
+  e.preventDefault();
+
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  const errorEl  = document.getElementById('error-msg');
+  const btn      = document.getElementById('btn-login');
+
+  errorEl.classList.remove('show');
+  btn.disabled    = true;
+  btn.innerHTML   = '<span class="spinner"></span>Signing in…';
+
+  try {
+    const res = await fetch('/login', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      window.location.href = '/';
+    } else {
+      errorEl.classList.add('show');
+      btn.disabled  = false;
+      btn.textContent = 'Sign in';
+      document.getElementById('password').value = '';
+      document.getElementById('password').focus();
+    }
+  } catch (err) {
+    errorEl.textContent = 'Network error. Please try again.';
+    errorEl.classList.add('show');
+    btn.disabled    = false;
+    btn.textContent = 'Sign in';
+  }
+}
+  </script>
+
+</body>
+</html>

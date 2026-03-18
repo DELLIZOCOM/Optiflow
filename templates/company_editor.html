@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OptiFlow AI — Company Knowledge</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f2f5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .header {
+      background: #1a1a2e;
+      color: #fff;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .header-left h1 { font-size: 20px; font-weight: 600; }
+    .header-left p  { font-size: 13px; color: #8a8fb5; margin-top: 2px; }
+
+    .header-actions { display: flex; gap: 10px; align-items: center; }
+
+    .btn {
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.15s;
+      border: none;
+    }
+    .btn-back {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.25);
+      color: rgba(255,255,255,0.7);
+    }
+    .btn-back:hover { border-color: rgba(255,255,255,0.5); color: #fff; }
+
+    .btn-save {
+      background: #4c6ef5;
+      color: #fff;
+    }
+    .btn-save:hover { background: #364fc7; }
+    .btn-save:disabled { background: #888; cursor: not-allowed; }
+
+    .page {
+      flex: 1;
+      padding: 24px 32px;
+      max-width: 1000px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .info-card {
+      background: #e8f4fd;
+      border: 1px solid #bee3f8;
+      border-radius: 10px;
+      padding: 14px 18px;
+      font-size: 13px;
+      color: #1a365d;
+      line-height: 1.6;
+    }
+    .info-card strong { display: block; margin-bottom: 4px; font-size: 13.5px; }
+
+    .editor-wrap {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 12px;
+      overflow: hidden;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .editor-toolbar {
+      padding: 10px 16px;
+      background: #f7f8fa;
+      border-bottom: 1px solid #e8e8e8;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #666;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #editor {
+      width: 100%;
+      min-height: 420px;
+      padding: 20px;
+      font-family: "SFMono-Regular", "Consolas", "Monaco", monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      border: none;
+      outline: none;
+      resize: vertical;
+      color: #1a1a2e;
+      background: #fff;
+    }
+
+    .status-bar {
+      padding: 6px 16px;
+      background: #f7f8fa;
+      border-top: 1px solid #e8e8e8;
+      font-size: 12px;
+      color: #888;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    #save-status {
+      font-size: 13px;
+      padding: 4px 0;
+      transition: opacity 0.3s;
+    }
+    #save-status.success { color: #2b8a3e; }
+    #save-status.error   { color: #c92a2a; }
+
+    @media (max-width: 600px) {
+      .page { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-left">
+      <h1>OptiFlow AI</h1>
+      <p>Company Knowledge Editor</p>
+    </div>
+    <div class="header-actions">
+      <span id="save-status"></span>
+      <a href="/admin/settings" class="btn btn-back">← Settings</a>
+      <button class="btn btn-save" onclick="save()" id="save-btn">Save</button>
+    </div>
+  </div>
+
+  <div class="page">
+
+    <div class="info-card">
+      <strong>What is this?</strong>
+      This file (<code>config/company.md</code>) is included in every SQL generation prompt.
+      Describe your business, explain terminology, list data quality rules, and document
+      how your key tables relate. The more context you provide, the better OptiFlow's queries will be.
+      Use plain markdown — headings, bullet points, and comments all work.
+    </div>
+
+    <div class="editor-wrap">
+      <div class="editor-toolbar">
+        <span>config/company.md</span>
+        <span style="font-weight:400; text-transform:none; letter-spacing:0;">Markdown</span>
+      </div>
+      <textarea id="editor" spellcheck="false">{{ content | e }}</textarea>
+      <div class="status-bar">
+        <span id="char-count">0 characters</span>
+        <span>Ctrl+S to save</span>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const editor = document.getElementById('editor');
+    const charCount = document.getElementById('char-count');
+    const saveStatus = document.getElementById('save-status');
+
+    function updateCount() {
+      const n = editor.value.length;
+      charCount.textContent = n.toLocaleString() + ' character' + (n === 1 ? '' : 's');
+    }
+
+    editor.addEventListener('input', updateCount);
+    updateCount();
+
+    // Ctrl+S to save
+    editor.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        save();
+      }
+    });
+
+    async function save() {
+      const btn = document.getElementById('save-btn');
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      saveStatus.textContent = '';
+      saveStatus.className = '';
+
+      try {
+        const res = await fetch('/admin/company', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: editor.value }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          saveStatus.textContent = '✓ Saved';
+          saveStatus.className = 'success';
+        } else {
+          saveStatus.textContent = '✗ ' + (data.error || 'Save failed');
+          saveStatus.className = 'error';
+        }
+      } catch (e) {
+        saveStatus.textContent = '✗ Network error';
+        saveStatus.className = 'error';
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Save';
+
+      // Auto-clear status after 3s
+      setTimeout(() => {
+        saveStatus.textContent = '';
+        saveStatus.className = '';
+      }, 3000);
+    }
+  </script>
+
+</body>
+</html>

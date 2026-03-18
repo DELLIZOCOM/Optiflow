@@ -14,6 +14,7 @@ import re
 
 import anthropic
 
+from config.loader import load_model_config
 from config.settings import ANTHROPIC_API_KEY
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,15 @@ with open(_PROMPT_PATH) as _f:
 # Regex to strip ```json ... ``` wrappers Claude sometimes adds.
 _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?\s*```$", re.DOTALL)
 
-_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+# Load model from config (fallback model for intent parser — used when Ollama fails)
+_CLOUD_MODEL = (
+    load_model_config()
+    .get("intent_parser", {})
+    .get("fallback", {})
+    .get("model", "claude-sonnet-4-20250514")
+)
+
+_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY or "not-configured")
 
 
 _VALID_CONFIDENCE = {"high", "medium", "low"}
@@ -49,6 +58,7 @@ def parse(question: str) -> dict:
         On failure returns {'intent': 'unknown', 'error': '...', 'original': question,
         'match_confidence': 'low'}.
     """
+    logger.info("PARSER: Claude API")
     if not question or not question.strip():
         return {"intent": "unknown", "error": "empty_question",
                 "original": question, "match_confidence": "low"}
@@ -56,7 +66,7 @@ def parse(question: str) -> dict:
     # Call Claude API
     try:
         response = _client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=_CLOUD_MODEL,
             max_tokens=200,
             temperature=0,
             system=_SYSTEM_PROMPT,

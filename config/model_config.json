@@ -1,0 +1,25 @@
+{
+  "_comment": "Model configuration for OptiFlow AI. Change model names or endpoints here — no code changes needed.",
+  "intent_parser": {
+    "_comment": "Local model for fast intent classification. Falls back to Anthropic on timeout or failure.",
+    "provider": "ollama",
+    "model": "qwen2.5-coder:3b",
+    "endpoint": "http://localhost:11434/api/generate",
+    "timeout_seconds": 5,
+    "fallback": {
+      "_comment": "Used automatically when the local model fails or times out.",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-20250514"
+    }
+  },
+  "agent_mode": {
+    "_comment": "Used to generate SQL queries and chains in Agent Mode.",
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514"
+  },
+  "response_interpreter": {
+    "_comment": "Used to interpret and summarise SQL results in natural language.",
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514"
+  }
+}

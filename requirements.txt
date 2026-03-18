@@ -5,3 +5,4 @@ pyodbc
 anthropic
 python-dotenv
 requests
+bcrypt

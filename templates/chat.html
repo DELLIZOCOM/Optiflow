@@ -20,24 +20,86 @@
       flex-direction: column;
     }
 
+    /* ── DB permission warning banner ── */
+    .db-warn-banner {
+      background: #fff3bf;
+      color: #7a5800;
+      border-bottom: 1px solid #ffe066;
+      padding: 8px 24px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .db-warn-banner button {
+      background: none;
+      border: none;
+      color: #7a5800;
+      cursor: pointer;
+      font-size: 16px;
+      padding: 0 4px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+
     /* ── Header ── */
     .header {
       background: #1a1a2e;
       color: #fff;
       padding: 16px 24px;
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
 
-    .header h1 {
+    .header-left h1 {
       font-size: 20px;
       font-weight: 600;
     }
 
-    .header p {
+    .header-left p {
       font-size: 13px;
       color: #8a8fb5;
       margin-top: 2px;
     }
+
+    .btn-logout {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.25);
+      color: rgba(255,255,255,0.7);
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      white-space: nowrap;
+    }
+    .btn-logout:hover {
+      border-color: rgba(255,255,255,0.55);
+      color: #fff;
+      background: rgba(255,255,255,0.08);
+    }
+
+    .btn-audit {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.18);
+      color: rgba(255,255,255,0.55);
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      transition: border-color 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+    .btn-audit:hover { border-color: rgba(255,255,255,0.4); color: rgba(255,255,255,0.85); }
+
+    .header-actions { display: flex; align-items: center; gap: 10px; }
 
     /* ── Chat area ── */
     .chat-area {
@@ -582,9 +644,27 @@
 <body>
 
   <div class="header">
-    <h1>OptiFlow AI</h1>
-    <p>BizFlow ERP Intelligence</p>
+    <div class="header-left">
+      <h1>OptiFlow AI</h1>
+      <p>Database Intelligence</p>
+    </div>
+    <div class="header-actions">
+      {% if user_role == 'admin' %}
+      <a href="/admin/settings" class="btn-audit">Settings</a>
+      <a href="/admin/audit" class="btn-audit">Audit Log</a>
+      {% endif %}
+      <form method="POST" action="/logout" style="margin:0;">
+        <button type="submit" class="btn-logout">Sign out</button>
+      </form>
+    </div>
   </div>
+
+  {% if db_warning %}
+  <div class="db-warn-banner" id="db-warn-banner">
+    <span>⚠ {{ db_warning }}</span>
+    <button onclick="document.getElementById('db-warn-banner').style.display='none'" title="Dismiss">✕</button>
+  </div>
+  {% endif %}
 
   <div class="chat-area" id="chatArea">
   </div>
@@ -614,6 +694,16 @@ let busy = false;
 // Pending queries keyed by card ID
 const pendingQueries = {};
 let agentCardCounter = 0;
+
+// ── Auth helper ─────────────────────────────────────────────────────────────
+
+function handleUnauthorized(res) {
+  if (res.status === 401) {
+    window.location.href = '/login?expired=1';
+    return true;
+  }
+  return false;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -829,6 +919,7 @@ async function approveQuery(cardId) {
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(pending),
     });
+    if (handleUnauthorized(res)) return;
     const data = await res.json();
     const card = document.getElementById(cardId);
     if (card) card.remove();
@@ -885,6 +976,7 @@ async function approveChain(cardId) {
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(pending),
     });
+    if (handleUnauthorized(res)) { clearInterval(progressInterval); return; }
     const data = await res.json();
     clearInterval(progressInterval);
 
@@ -912,7 +1004,7 @@ async function rejectQuery(cardId) {
   const pending = pendingQueries[cardId];
 
   try {
-    await fetch('/reject', {
+    const res = await fetch('/reject', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
@@ -920,6 +1012,7 @@ async function rejectQuery(cardId) {
         sql:      pending?.sql || (pending?.steps?.[0]?.sql || ''),
       }),
     });
+    if (handleUnauthorized(res)) return;
   } catch (_) { /* non-critical */ }
 
   const card = document.getElementById(cardId);
@@ -955,6 +1048,7 @@ async function sendQuestion(question) {
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ question }),
     });
+    if (handleUnauthorized(res)) return;
     const data = await res.json();
     hideLoading();
 
@@ -1018,6 +1112,7 @@ function sendFromInput() {
   showLoading();
   try {
     const res  = await fetch('/welcome');
+    if (handleUnauthorized(res)) return;
     const data = await res.json();
     hideLoading();
     addMessage(data.message, 'ai', data.time_ms + 'ms');

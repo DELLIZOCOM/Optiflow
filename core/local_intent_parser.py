@@ -4,9 +4,10 @@ Local intent parser — drop-in replacement for intent_parser.py.
 Uses a local Ollama model instead of the Claude API.
 Identical function signature: parse(question) -> dict
 
-If Ollama is unavailable or returns garbage, returns
-{'intent': 'unknown', 'match_confidence': 'low'} which causes
-_run_pipeline to fall through to Agent Mode (Claude still runs).
+Fallback chain:
+  1. Try local Ollama (5s timeout)
+  2. On timeout or bad response → try Claude API (intent_parser.py)
+  3. If Claude also fails → return {'intent': 'unknown', 'match_confidence': 'low'}
 """
 
 import json
@@ -15,6 +16,8 @@ import os
 import re
 
 import requests
+
+from config.loader import load_model_config
 
 logger = logging.getLogger(__name__)
 
@@ -26,30 +29,43 @@ _PROMPT_PATH = os.path.join(
 with open(_PROMPT_PATH) as _f:
     _SYSTEM_PROMPT = _f.read()
 
-_OLLAMA_URL  = "http://localhost:11434/api/generate"
-_MODEL       = "qwen2.5-coder:3b"
-_TIMEOUT     = 10          # seconds — if Ollama is slow/down, fall back to Agent Mode
+# Load model settings from config/model_config.json (falls back to defaults if missing)
+_ip         = load_model_config().get("intent_parser", {})
+_OLLAMA_URL = _ip.get("endpoint", "http://localhost:11434/api/generate")
+_MODEL      = _ip.get("model", "qwen2.5-coder:3b")
+_TIMEOUT    = int(_ip.get("timeout_seconds", 5))
 
-_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?\s*```$", re.DOTALL)
+_CODE_FENCE_RE    = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?\s*```$", re.DOTALL)
 _VALID_CONFIDENCE = {"high", "medium", "low"}
 
-_FALLBACK = {"intent": "unknown", "match_confidence": "low"}
+_FALLBACK  = {"intent": "unknown", "match_confidence": "low"}
+_BASE_PROMPT = _SYSTEM_PROMPT
+
+
+def _claude_fallback(question: str) -> dict:
+    """Fall back to the Claude API parser on Ollama failure."""
+    from core.intent_parser import parse as cloud_parse
+    logger.warning("Ollama failed — falling back to Claude API")
+    return cloud_parse(question)
 
 
 def parse(question: str) -> dict:
     """Parse a natural language question into an intent dict via Ollama.
 
     Returns the same shape as intent_parser.parse():
-        {'intent': '...', 'match_confidence': 'high'|'medium'|'low', ...params}
+        {'intent': 'business_health'|'deep_dive'|'agent'|'unknown',
+         'match_confidence': 'high'|'medium'|'low', ...}
 
-    On any failure (Ollama down, timeout, bad JSON) returns:
-        {'intent': 'unknown', 'match_confidence': 'low'}
-    which triggers Agent Mode as a safe fallback.
+    Fallback chain:
+      1. Try local Ollama (5s timeout)
+      2. On timeout or parse failure → try Claude API
+      3. If Claude also fails → return {'intent': 'unknown', 'match_confidence': 'low'}
     """
+    logger.info("PARSER: Local Ollama")
     if not question or not question.strip():
         return {**_FALLBACK, "error": "empty_question", "original": question}
 
-    prompt = _SYSTEM_PROMPT + "\n\nQuestion: " + question
+    prompt = _BASE_PROMPT + "\n\nQuestion: " + question
 
     try:
         resp = requests.post(
@@ -65,11 +81,11 @@ def parse(question: str) -> dict:
         resp.raise_for_status()
         text = resp.json()["response"].strip()
     except requests.exceptions.Timeout:
-        logger.warning(f"Ollama timeout after {_TIMEOUT}s — falling back to Agent Mode")
-        return {**_FALLBACK, "error": "ollama_timeout"}
+        logger.warning(f"Ollama timeout after {_TIMEOUT}s — falling back to Claude API")
+        return _claude_fallback(question)
     except Exception as e:
-        logger.warning(f"Ollama unavailable: {e} — falling back to Agent Mode")
-        return {**_FALLBACK, "error": "ollama_unavailable"}
+        logger.warning(f"Ollama unavailable: {e} — falling back to Claude API")
+        return _claude_fallback(question)
 
     # Strip markdown code fences if present
     fence_match = _CODE_FENCE_RE.match(text)
@@ -80,12 +96,12 @@ def parse(question: str) -> dict:
     try:
         result = json.loads(text)
     except (json.JSONDecodeError, ValueError):
-        logger.warning(f"Ollama returned non-JSON: {text!r}")
-        return {**_FALLBACK, "error": "parse_failed"}
+        logger.warning(f"Ollama returned non-JSON: {text!r} — falling back to Claude API")
+        return _claude_fallback(question)
 
     if not isinstance(result, dict):
-        logger.warning(f"Ollama returned non-dict JSON: {result!r}")
-        return {**_FALLBACK, "error": "parse_failed"}
+        logger.warning(f"Ollama returned non-dict JSON: {result!r} — falling back to Claude API")
+        return _claude_fallback(question)
 
     # Normalise match_confidence
     if result.get("match_confidence") not in _VALID_CONFIDENCE:

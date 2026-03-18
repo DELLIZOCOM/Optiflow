@@ -1,0 +1,1238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OptiFlow AI — Setup</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f2f5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: #1a1a2e;
+      color: #fff;
+      padding: 16px 24px;
+      flex-shrink: 0;
+    }
+    .header h1 { font-size: 20px; font-weight: 600; }
+    .header p  { font-size: 13px; color: #8a8fb5; margin-top: 2px; }
+
+    /* ── Wizard wrapper ── */
+    .wizard-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 24px 48px;
+    }
+
+    .wizard {
+      width: 100%;
+      max-width: 680px;
+    }
+
+    /* ── Step indicator ── */
+    .step-bar {
+      display: flex;
+      align-items: center;
+      margin-bottom: 28px;
+    }
+
+    .step-dot {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+      position: relative;
+    }
+
+    .step-dot:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      top: 14px;
+      left: 60%;
+      width: 80%;
+      height: 2px;
+      background: #d0d0d0;
+      z-index: 0;
+      transition: background 0.3s;
+    }
+    .step-dot.done:not(:last-child)::after { background: #1a1a2e; }
+
+    .step-circle {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 2px solid #d0d0d0;
+      background: #fff;
+      color: #999;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1;
+      transition: all 0.25s;
+      position: relative;
+    }
+    .step-dot.active .step-circle  { border-color: #1a1a2e; color: #1a1a2e; background: #fff; }
+    .step-dot.done   .step-circle  { border-color: #1a1a2e; background: #1a1a2e; color: #fff; }
+
+    .step-label {
+      font-size: 11px;
+      color: #999;
+      font-weight: 500;
+      white-space: nowrap;
+      transition: color 0.25s;
+    }
+    .step-dot.active .step-label { color: #1a1a2e; font-weight: 600; }
+    .step-dot.done   .step-label { color: #555; }
+
+    /* ── Panel ── */
+    .panel {
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid #e0e0e0;
+      padding: 28px 32px;
+      animation: fadeIn 0.2s ease;
+    }
+    .panel.hidden { display: none; }
+
+    .panel-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 4px;
+    }
+    .panel-subtitle {
+      font-size: 13px;
+      color: #777;
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+
+    /* ── Form elements ── */
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #444;
+      margin-bottom: 6px;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 10px 13px;
+      border: 1px solid #d0d0d0;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s;
+      background: #fafafa;
+    }
+    .form-group input:focus {
+      border-color: #1a1a2e;
+      background: #fff;
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .pw-hint {
+      font-size: 11px;
+      color: #aaa;
+      margin-top: 4px;
+    }
+
+    /* ── Status messages ── */
+    .status {
+      margin-top: 12px;
+      font-size: 13px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      display: none;
+      line-height: 1.5;
+    }
+    .status.show { display: block; }
+    .status.success { background: #d3f9d8; color: #1e6b2e; border: 1px solid #a3e6b3; }
+    .status.error   { background: #ffe3e3; color: #c92a2a; border: 1px solid #ffb3b3; }
+    .status.info    { background: #e8f4fd; color: #1c5a9e; border: 1px solid #b3d4ef; }
+
+    /* ── Buttons ── */
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 24px;
+      align-items: center;
+    }
+    .btn {
+      padding: 10px 22px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary  { background: #1a1a2e; color: #fff; }
+    .btn-primary:not(:disabled):hover  { background: #16213e; }
+    .btn-secondary { background: #fff; color: #1a1a2e; border: 1.5px solid #1a1a2e; }
+    .btn-secondary:not(:disabled):hover { background: #f0f0f0; }
+    .btn-success   { background: #2b8a3e; color: #fff; }
+    .btn-success:not(:disabled):hover   { background: #1e7e34; }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .spinner-dark {
+      border-color: rgba(26,26,46,0.25);
+      border-top-color: #1a1a2e;
+    }
+
+    /* ── Table grid (schema step) ── */
+    .table-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .table-card {
+      background: #f9f9f9;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .table-card-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1a1a2e;
+      margin-bottom: 4px;
+      word-break: break-word;
+    }
+    .table-card-meta {
+      font-size: 11px;
+      color: #888;
+    }
+
+    /* ── Hints (schema hints collapsible) ── */
+    .hints-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      cursor: pointer;
+      border-top: 1px solid #eee;
+      margin-top: 20px;
+    }
+    .hints-header span { font-size: 13px; font-weight: 600; color: #555; }
+    .hints-header .chevron { font-size: 12px; color: #888; transition: transform 0.2s; }
+    .hints-header.open .chevron { transform: rotate(180deg); }
+    .hints-body { display: none; padding: 10px 0 4px; }
+    .hints-body.open { display: block; }
+
+    .hint-item {
+      margin-bottom: 10px;
+    }
+    .hint-table-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: #1a1a2e;
+      font-family: monospace;
+      margin-bottom: 2px;
+    }
+    .hint-col {
+      font-size: 12px;
+      color: #555;
+      padding: 2px 0 2px 12px;
+    }
+    .hint-col span {
+      font-family: monospace;
+      color: #3b5bdb;
+      font-weight: 600;
+    }
+    .hint-vals {
+      font-size: 11px;
+      color: #777;
+      padding-left: 12px;
+    }
+
+    /* ── Dynamic rule tables ── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 20px 0 10px;
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+    }
+    .btn-add {
+      background: none;
+      border: 1px solid #3b5bdb;
+      color: #3b5bdb;
+      border-radius: 6px;
+      padding: 4px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-add:hover { background: #e8eaf6; }
+
+    .rule-table { width: 100%; border-collapse: collapse; }
+    .rule-table th {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: #888;
+      text-align: left;
+      padding: 0 6px 6px;
+    }
+    .rule-table td { padding: 4px 4px; }
+    .rule-table input {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 12px;
+      outline: none;
+    }
+    .rule-table input:focus { border-color: #1a1a2e; }
+    .btn-del {
+      background: none;
+      border: none;
+      color: #c92a2a;
+      cursor: pointer;
+      font-size: 16px;
+      padding: 0 4px;
+      line-height: 1;
+    }
+    .btn-del:hover { color: #a62020; }
+    .empty-hint {
+      font-size: 12px;
+      color: #aaa;
+      font-style: italic;
+      padding: 6px 0;
+    }
+
+    /* ── Permission check box ── */
+    .perm-box {
+      margin-top: 10px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.5;
+      display: none;
+    }
+    .perm-box.show    { display: block; }
+    .perm-box.readonly { background: #d3f9d8; color: #1e6b2e; border: 1px solid #a3e6b3; }
+    .perm-box.warning  { background: #fff3bf; color: #7a5800; border: 1px solid #ffe066; }
+    .perm-box.blocked  { background: #ffe3e3; color: #c92a2a; border: 1px solid #ffb3b3; }
+    .perm-box.unknown  { background: #fff3bf; color: #7a5800; border: 1px solid #ffe066; }
+    .perm-box-title { font-weight: 700; margin-bottom: 2px; }
+
+    /* ── SQL helper collapsible ── */
+    .sql-helper { margin-top: 10px; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; display: none; }
+    .sql-helper.show { display: block; }
+    .sql-helper-toggle {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; background: #f7f8fa; cursor: pointer;
+      font-size: 12.5px; font-weight: 600; color: #555; user-select: none;
+    }
+    .sql-helper-toggle:hover { background: #f0f0f0; }
+    .sql-helper-body { display: none; background: #1a1a2e; padding: 14px 18px; }
+    .sql-helper-body.open { display: block; }
+    .sql-helper-body pre { font-family: monospace; font-size: 12.5px; color: #c8d3f5; margin: 0; white-space: pre-wrap; line-height: 1.7; }
+
+    /* ── Warning continue button variant ── */
+    .btn-warn { background: #e65100; color: #fff; }
+    .btn-warn:not(:disabled):hover { background: #bf360c; }
+
+    /* ── Status warning variant ── */
+    .status.warning { background: #fff3bf; color: #7a5800; border: 1px solid #ffe066; }
+
+    /* ── Step 5 done ── */
+    .done-icon {
+      width: 64px;
+      height: 64px;
+      background: #d3f9d8;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      margin: 0 auto 20px;
+    }
+    .done-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 20px 0;
+    }
+    .done-stat {
+      background: #f5f5f5;
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .done-stat-val { font-size: 22px; font-weight: 700; color: #1a1a2e; }
+    .done-stat-lbl { font-size: 12px; color: #888; margin-top: 2px; }
+
+    /* ── Animations ── */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @media (max-width: 600px) {
+      .panel { padding: 20px 18px; }
+      .form-row { grid-template-columns: 1fr; }
+      .done-grid { grid-template-columns: 1fr; }
+      .wizard-wrap { padding: 20px 12px 40px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>OptiFlow AI</h1>
+    <p>First-time setup — connect OptiFlow to your database</p>
+  </div>
+
+  <div class="wizard-wrap">
+    <div class="wizard">
+
+      <!-- Step indicator (6 steps) -->
+      <div class="step-bar">
+        <div class="step-dot active" id="dot-1">
+          <div class="step-circle">1</div>
+          <div class="step-label">Admin</div>
+        </div>
+        <div class="step-dot" id="dot-2">
+          <div class="step-circle">2</div>
+          <div class="step-label">Connect</div>
+        </div>
+        <div class="step-dot" id="dot-3">
+          <div class="step-circle">3</div>
+          <div class="step-label">Discover</div>
+        </div>
+        <div class="step-dot" id="dot-4">
+          <div class="step-circle">4</div>
+          <div class="step-label">Teach</div>
+        </div>
+        <div class="step-dot" id="dot-5">
+          <div class="step-circle">5</div>
+          <div class="step-label">Configure</div>
+        </div>
+        <div class="step-dot" id="dot-6">
+          <div class="step-circle">6</div>
+          <div class="step-label">Launch</div>
+        </div>
+      </div>
+
+      <!-- ── Step 1: Create Admin Account ──────────────────────────────── -->
+      <div class="panel" id="panel-1">
+        <div class="panel-title">Create Admin Account</div>
+        <div class="panel-subtitle">
+          Set up the administrator account for OptiFlow AI.
+          This is the login you'll use every time you access the system.
+        </div>
+
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" id="inp-username" placeholder="admin" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="inp-pw" placeholder="Min. 8 characters" autocomplete="new-password">
+          <div class="pw-hint">Minimum 8 characters</div>
+        </div>
+        <div class="form-group">
+          <label>Confirm password</label>
+          <input type="password" id="inp-pw2" placeholder="Re-enter password" autocomplete="new-password">
+        </div>
+
+        <div class="status" id="admin-status"></div>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="createAdmin()">Create Account →</button>
+        </div>
+      </div>
+
+      <!-- ── Step 2: Database Connection ───────────────────────────────── -->
+      <div class="panel hidden" id="panel-2">
+        <div class="panel-title">Database Connection</div>
+        <div class="panel-subtitle">Enter your SQL Server credentials. OptiFlow will save them to .env.</div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Server host / IP</label>
+            <input type="text" id="inp-server" placeholder="192.168.1.100" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label>Database name</label>
+            <input type="text" id="inp-db" placeholder="MyDatabase" autocomplete="off">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Username</label>
+            <input type="text" id="inp-user" placeholder="sa" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="inp-pass" placeholder="••••••••">
+          </div>
+        </div>
+
+        <div class="status" id="conn-status"></div>
+
+        <!-- Permission check result (auto-shown after successful connection) -->
+        <div class="perm-box" id="perm-box">
+          <div class="perm-box-title" id="perm-title"></div>
+          <div id="perm-detail"></div>
+        </div>
+
+        <!-- SQL helper: shown for warning / blocked -->
+        <div class="sql-helper" id="perm-sql">
+          <div class="sql-helper-toggle" onclick="toggleSqlHelper()">
+            <span>How to create a read-only database user</span>
+            <span id="sql-chevron">▼</span>
+          </div>
+          <div class="sql-helper-body" id="perm-sql-body">
+            <pre id="perm-sql-text"></pre>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="btn-test" onclick="testConnection()">Test Connection</button>
+          <button class="btn btn-primary" id="btn-next-2" onclick="goTo(3)" disabled>Continue →</button>
+        </div>
+      </div>
+
+      <!-- ── Step 3: Schema Discovery ──────────────────────────────────── -->
+      <div class="panel hidden" id="panel-3">
+        <div class="panel-title">Schema Discovery</div>
+        <div class="panel-subtitle" id="disc-subtitle">OptiFlow will scan your database tables, columns, and sample values to build its understanding of your data.</div>
+
+        <div class="status" id="disc-status"></div>
+
+        <div id="disc-btn-wrap">
+          <button class="btn btn-primary" id="btn-disc" onclick="discoverSchema()">Run Schema Discovery</button>
+        </div>
+
+        <div id="tables-grid" class="table-grid" style="display:none;"></div>
+
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="goTo(2)">← Back</button>
+          <button class="btn btn-primary" id="btn-next-3" onclick="goTo(4)" disabled>Continue →</button>
+        </div>
+      </div>
+
+      <!-- ── Step 4: Company Knowledge ──────────────────────────────────── -->
+      <div class="panel hidden" id="panel-4">
+        <div class="panel-title">Teach OptiFlow About Your Business</div>
+        <div class="panel-subtitle">
+          Describe your business so OptiFlow writes better queries. This file (<code>config/company.md</code>)
+          is included in every AI prompt. You can edit it later at <strong>Settings → Company Knowledge</strong>.
+          <br><span style="color:#888;font-size:12px;">Optional — click Skip to continue without setting this up.</span>
+        </div>
+
+        <div class="status" id="teach-status"></div>
+
+        <div style="margin-bottom:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <button class="btn btn-secondary" id="btn-generate" onclick="generateKnowledge()">Generate Draft with AI</button>
+          <span style="font-size:12px; color:#888;">Uses your discovered schema to write an initial draft you can edit.</span>
+        </div>
+
+        <div class="form-group" style="margin-bottom:0;">
+          <label style="font-weight:600; margin-bottom:6px; display:block;">Company Knowledge (Markdown)</label>
+          <textarea id="inp-company-md" rows="14" style="
+            width:100%; padding:14px; font-family:'SFMono-Regular','Consolas',monospace;
+            font-size:12.5px; line-height:1.7; border:1px solid #d0d0d0;
+            border-radius:8px; resize:vertical; outline:none; color:#1a1a2e;
+          " placeholder="Describe your business, key tables, terminology, and any data quality rules…"></textarea>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="goTo(3)">← Back</button>
+          <button class="btn btn-secondary" onclick="goTo(5)">Skip →</button>
+          <button class="btn btn-primary" onclick="saveCompanyKnowledge()">Save &amp; Continue →</button>
+        </div>
+      </div>
+
+      <!-- ── Step 5: Business Context (Configure) ────────────────────────── -->
+      <div class="panel hidden" id="panel-5">
+        <div class="panel-title">Configure OptiFlow</div>
+        <div class="panel-subtitle">Tell OptiFlow about your business so it generates better queries. Everything here is optional — you can edit <code>config/business_context.json</code> at any time.</div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Company name</label>
+            <input type="text" id="inp-company" placeholder="Acme Corp">
+          </div>
+          <div class="form-group">
+            <label>Business type</label>
+            <input type="text" id="inp-btype" placeholder="Manufacturing / SaaS / Retail…">
+          </div>
+        </div>
+
+        <!-- Schema Hints (collapsible, auto-populated from discovery) -->
+        <div class="hints-header" id="hints-header" onclick="toggleHints()">
+          <span>Schema Hints (discovered enum values)</span>
+          <span class="chevron">▼</span>
+        </div>
+        <div class="hints-body" id="hints-body"></div>
+
+        <!-- Data quality rules -->
+        <div class="section-header">
+          <span class="section-title">Data Quality Rules</span>
+          <button class="btn-add" onclick="addRow('rules-tbody', rulesRowTpl)">+ Add Rule</button>
+        </div>
+        <p style="font-size:12px;color:#888;margin-bottom:8px;">SQL WHERE-clause conditions for tables with known data issues (e.g. test records or migration artifacts).</p>
+        <table class="rule-table">
+          <thead><tr>
+            <th style="width:20%">Table</th>
+            <th style="width:36%">Filter condition</th>
+            <th style="width:28%">Reason</th>
+            <th style="width:12%">Cond. col</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="rules-tbody"></tbody>
+        </table>
+        <div class="empty-hint" id="rules-empty">No rules yet — add one above if needed.</div>
+
+        <!-- Terminology -->
+        <div class="section-header">
+          <span class="section-title">Terminology</span>
+          <button class="btn-add" onclick="addRow('terms-tbody', termsRowTpl)">+ Add Term</button>
+        </div>
+        <p style="font-size:12px;color:#888;margin-bottom:8px;">Domain-specific terms so the AI understands your business language (e.g. "COC = Certificate of Completion").</p>
+        <table class="rule-table">
+          <thead><tr>
+            <th style="width:30%">Term</th>
+            <th>Meaning</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="terms-tbody"></tbody>
+        </table>
+        <div class="empty-hint" id="terms-empty">No terms yet.</div>
+
+        <!-- Column warnings -->
+        <div class="section-header">
+          <span class="section-title">Column Warnings</span>
+          <button class="btn-add" onclick="addRow('warns-tbody', warnsRowTpl)">+ Add Warning</button>
+        </div>
+        <p style="font-size:12px;color:#888;margin-bottom:8px;">Flag columns with data quality issues so the AI avoids them (e.g. a date column that's mostly NULL).</p>
+        <table class="rule-table">
+          <thead><tr>
+            <th style="width:20%">Table</th>
+            <th style="width:20%">Column</th>
+            <th>Warning note</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="warns-tbody"></tbody>
+        </table>
+        <div class="empty-hint" id="warns-empty">No warnings yet.</div>
+
+        <div class="status" id="ctx-status"></div>
+
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="goTo(4)">← Back</button>
+          <button class="btn btn-primary" onclick="saveContext()">Save &amp; Continue →</button>
+        </div>
+      </div>
+
+      <!-- ── Step 6: Done ───────────────────────────────────────────────── -->
+      <div class="panel hidden" id="panel-6" style="text-align:center;">
+        <div class="done-icon">✓</div>
+        <div class="panel-title" style="margin-bottom:8px;">Setup Complete</div>
+        <div class="panel-subtitle" style="margin-bottom:0;" id="done-subtitle">OptiFlow is connected and ready.</div>
+
+        <div class="done-grid" id="done-grid"></div>
+
+        <div class="btn-row" style="justify-content:center; margin-top:8px;">
+          <a href="/" class="btn btn-success" style="text-decoration:none;">Launch OptiFlow →</a>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+// ── State ──────────────────────────────────────────────────────────────────
+let connectionData = null;   // {server, database, user, password}
+let schemaData     = null;   // {db_name, server, tables: [...]}
+const TOTAL_STEPS  = 6;
+
+// ── Step navigation ────────────────────────────────────────────────────────
+function goTo(n) {
+  for (let i = 1; i <= TOTAL_STEPS; i++) {
+    document.getElementById('panel-' + i).classList.toggle('hidden', i !== n);
+    const dot = document.getElementById('dot-' + i);
+    dot.classList.toggle('active', i === n);
+    dot.classList.toggle('done',   i < n);
+  }
+  window.scrollTo(0, 0);
+}
+
+// ── Status helpers ─────────────────────────────────────────────────────────
+function setStatus(id, type, msg) {
+  const el = document.getElementById(id);
+  el.className = 'status show ' + type;
+  el.textContent = msg;
+}
+function clearStatus(id) {
+  const el = document.getElementById(id);
+  el.className = 'status';
+  el.textContent = '';
+}
+
+function setLoading(btnId, loading, label) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.disabled = loading;
+  btn.innerHTML = loading
+    ? `<span class="spinner"></span>${label || 'Loading…'}`
+    : (btn.dataset.label || btn.textContent);
+  if (!loading && btn.dataset.label) btn.textContent = btn.dataset.label;
+}
+
+function initBtn(btnId) {
+  const btn = document.getElementById(btnId);
+  if (btn && !btn.dataset.label) btn.dataset.label = btn.textContent;
+}
+
+// ── Step 1: Create Admin ────────────────────────────────────────────────────
+async function createAdmin() {
+  const username = document.getElementById('inp-username').value.trim();
+  const pw       = document.getElementById('inp-pw').value;
+  const pw2      = document.getElementById('inp-pw2').value;
+
+  clearStatus('admin-status');
+
+  if (!username) {
+    setStatus('admin-status', 'error', 'Username is required.');
+    return;
+  }
+  if (pw.length < 8) {
+    setStatus('admin-status', 'error', 'Password must be at least 8 characters.');
+    return;
+  }
+  if (pw !== pw2) {
+    setStatus('admin-status', 'error', 'Passwords do not match.');
+    return;
+  }
+
+  setStatus('admin-status', 'info', 'Creating account…');
+
+  try {
+    const res  = await fetch('/setup/create-admin', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ username, password: pw }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      setStatus('admin-status', 'success', `✓ Admin account created. Welcome, ${escHtml(username)}!`);
+      setTimeout(() => goTo(2), 800);
+    } else {
+      setStatus('admin-status', 'error', '✗ ' + data.error);
+    }
+  } catch (err) {
+    setStatus('admin-status', 'error', '✗ Network error: ' + err.message);
+  }
+}
+
+// Allow Enter in confirm-password to submit
+document.getElementById('inp-pw2').addEventListener('keydown', e => {
+  if (e.key === 'Enter') createAdmin();
+});
+
+// ── Step 2: Test Connection ────────────────────────────────────────────────
+async function testConnection() {
+  initBtn('btn-test');
+  const server   = document.getElementById('inp-server').value.trim();
+  const database = document.getElementById('inp-db').value.trim();
+  const user     = document.getElementById('inp-user').value.trim();
+  const password = document.getElementById('inp-pass').value.trim();
+
+  if (!server || !database || !user || !password) {
+    setStatus('conn-status', 'error', 'All fields are required.');
+    return;
+  }
+
+  clearStatus('conn-status');
+  setLoading('btn-test', true, 'Testing…');
+
+  try {
+    const res  = await fetch('/setup/test-connection', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({server, database, user, password}),
+    });
+    const data = await res.json();
+    if (data.success) {
+      setStatus('conn-status', 'success', `✓ ${data.message || 'Connection successful.'}`);
+      connectionData = {server, database, user, password};
+      // Don't enable Continue yet — wait for the permission check result
+      await checkPermissions(server, database, user, password);
+    } else {
+      setStatus('conn-status', 'error', '✗ ' + data.error);
+      hidePerm();
+    }
+  } catch (err) {
+    setStatus('conn-status', 'error', '✗ Network error: ' + err.message);
+    hidePerm();
+  }
+  setLoading('btn-test', false);
+}
+
+function hidePerm() {
+  document.getElementById('perm-box').className = 'perm-box';
+  document.getElementById('perm-sql').className = 'sql-helper';
+}
+
+function toggleSqlHelper() {
+  const body = document.getElementById('perm-sql-body');
+  const chev = document.getElementById('sql-chevron');
+  const open = body.classList.toggle('open');
+  chev.textContent = open ? '▲' : '▼';
+}
+
+async function checkPermissions(server, database, user, password) {
+  // Show a subtle "checking..." state in the perm-box
+  const box = document.getElementById('perm-box');
+  box.className = 'perm-box unknown show';
+  document.getElementById('perm-title').textContent = 'Checking permissions…';
+  document.getElementById('perm-detail').textContent = '';
+
+  const btn = document.getElementById('btn-next-2');
+  btn.disabled = true;
+
+  try {
+    const res  = await fetch('/setup/check-permissions', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({server, database, user, password}),
+    });
+    const data = await res.json();
+
+    if (!data.success) {
+      // Connection failed mid-check (shouldn't happen, but handle gracefully)
+      box.className = 'perm-box unknown show';
+      document.getElementById('perm-title').textContent = '⚠ Could not verify permissions.';
+      document.getElementById('perm-detail').textContent = 'Make sure this is a read-only user.';
+      btn.disabled = false;
+      btn.textContent = 'Continue →';
+      btn.className = 'btn btn-primary';
+      return;
+    }
+
+    const level  = data.access_level;
+    const sqlTxt = readonlySql(database);
+
+    if (level === 'readonly') {
+      box.className = 'perm-box readonly show';
+      document.getElementById('perm-title').textContent = '✓ Read-only access confirmed.';
+      document.getElementById('perm-detail').textContent = 'This user can only read data.';
+      document.getElementById('perm-sql').className = 'sql-helper';
+      btn.disabled   = false;
+      btn.textContent = 'Continue →';
+      btn.className  = 'btn btn-primary';
+
+    } else if (level === 'warning') {
+      box.className = 'perm-box warning show';
+      document.getElementById('perm-title').textContent = '⚠ Write permissions detected.';
+      document.getElementById('perm-detail').textContent =
+        data.message + ' We strongly recommend creating a read-only user.';
+      document.getElementById('perm-sql').className = 'sql-helper show';
+      document.getElementById('perm-sql-text').textContent = sqlTxt;
+      btn.disabled   = false;
+      btn.textContent = 'Continue Anyway (Not Recommended)';
+      btn.className  = 'btn btn-warn';
+
+    } else if (level === 'blocked') {
+      box.className = 'perm-box blocked show';
+      document.getElementById('perm-title').textContent = '✗ Admin/owner privileges detected.';
+      document.getElementById('perm-detail').textContent =
+        data.message + ' Please create a read-only user before continuing.';
+      document.getElementById('perm-sql').className = 'sql-helper show';
+      document.getElementById('perm-sql-text').textContent = sqlTxt;
+      btn.disabled   = true;
+      btn.textContent = 'Cannot Continue — Please Use a Read-Only User';
+      btn.className  = 'btn btn-primary';
+
+    } else {
+      // unknown — sys views restricted
+      box.className = 'perm-box unknown show';
+      document.getElementById('perm-title').textContent = '⚠ Could not verify permissions.';
+      document.getElementById('perm-detail').textContent =
+        'Make sure this is a read-only user.';
+      document.getElementById('perm-sql').className = 'sql-helper';
+      btn.disabled   = false;
+      btn.textContent = 'Continue →';
+      btn.className  = 'btn btn-primary';
+    }
+
+  } catch (err) {
+    // Network error on perm check — don't block setup
+    box.className = 'perm-box unknown show';
+    document.getElementById('perm-title').textContent = '⚠ Could not verify permissions.';
+    document.getElementById('perm-detail').textContent = 'Make sure this is a read-only user.';
+    btn.disabled   = false;
+    btn.textContent = 'Continue →';
+    btn.className  = 'btn btn-primary';
+  }
+}
+
+function readonlySql(dbName) {
+  return `-- Run in SQL Server Management Studio or sqlcmd:
+CREATE LOGIN optiflow_reader WITH PASSWORD = 'choose_a_strong_password';
+USE [${dbName}];
+CREATE USER optiflow_reader FOR LOGIN optiflow_reader;
+ALTER ROLE db_datareader ADD MEMBER optiflow_reader;`;
+}
+
+document.getElementById('inp-pass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') testConnection();
+});
+
+// ── Step 3: Schema Discovery ───────────────────────────────────────────────
+async function discoverSchema() {
+  initBtn('btn-disc');
+  clearStatus('disc-status');
+  setLoading('btn-disc', true, 'Scanning tables…');
+  setStatus('disc-status', 'info', 'Connecting and scanning your database. This may take 30–60 seconds for large databases…');
+
+  try {
+    const res  = await fetch('/setup/discover-schema', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify(connectionData),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      schemaData = data;
+      setStatus('disc-status', 'success',
+        `✓ Discovered ${data.tables.length} tables — credentials and schema saved`);
+
+      renderTableGrid(data.tables);
+
+      document.getElementById('disc-subtitle').textContent =
+        `Connected to ${data.db_name} on ${data.server}`;
+
+      document.getElementById('btn-next-3').disabled = false;
+      document.getElementById('btn-disc').style.display = 'none';
+    } else {
+      setStatus('disc-status', 'error', '✗ ' + data.error);
+    }
+  } catch (err) {
+    setStatus('disc-status', 'error', '✗ ' + err.message);
+  }
+  setLoading('btn-disc', false);
+}
+
+function renderTableGrid(tables) {
+  const grid = document.getElementById('tables-grid');
+  grid.innerHTML = '';
+  tables.forEach(t => {
+    const card = document.createElement('div');
+    card.className = 'table-card';
+    card.innerHTML = `
+      <div class="table-card-name">${escHtml(t.name)}</div>
+      <div class="table-card-meta">${t.row_count.toLocaleString()} rows</div>
+      <div class="table-card-meta">${t.columns.length} columns</div>
+    `;
+    grid.appendChild(card);
+  });
+  grid.style.display = 'grid';
+}
+
+// ── Step 4: Configure ──────────────────────────────────────────────────────
+function populateHints() {
+  if (!schemaData) return;
+  const body = document.getElementById('hints-body');
+  body.innerHTML = '';
+  let hasHints = false;
+  schemaData.tables.forEach(t => {
+    const cats = t.categorical || {};
+    const cols = Object.keys(cats);
+    if (!cols.length) return;
+    hasHints = true;
+    const item = document.createElement('div');
+    item.className = 'hint-item';
+    let html = `<div class="hint-table-name">${escHtml(t.name)}</div>`;
+    cols.forEach(col => {
+      const vals = cats[col];
+      html += `<div class="hint-col"><span>${escHtml(col)}</span></div>`;
+      html += `<div class="hint-vals">${vals.map(v => escHtml(String(v))).join(' · ')}</div>`;
+    });
+    item.innerHTML = html;
+    body.appendChild(item);
+  });
+  if (!hasHints) {
+    body.innerHTML = '<p class="empty-hint">No categorical columns detected.</p>';
+  }
+}
+
+function toggleHints() {
+  const header = document.getElementById('hints-header');
+  const body   = document.getElementById('hints-body');
+  header.classList.toggle('open');
+  body.classList.toggle('open');
+}
+
+function rulesRowTpl() {
+  return `
+    <tr>
+      <td><input type="text" placeholder="TableName"></td>
+      <td><input type="text" placeholder="Status != 'TEST'"></td>
+      <td><input type="text" placeholder="Reason…"></td>
+      <td><input type="text" placeholder="ColName (opt.)"></td>
+      <td><button class="btn-del" onclick="delRow(this)">×</button></td>
+    </tr>`;
+}
+function termsRowTpl() {
+  return `
+    <tr>
+      <td><input type="text" placeholder="Term"></td>
+      <td><input type="text" placeholder="What it means in your business"></td>
+      <td><button class="btn-del" onclick="delRow(this)">×</button></td>
+    </tr>`;
+}
+function warnsRowTpl() {
+  return `
+    <tr>
+      <td><input type="text" placeholder="TableName"></td>
+      <td><input type="text" placeholder="ColumnName"></td>
+      <td><input type="text" placeholder="Data quality issue…"></td>
+      <td><button class="btn-del" onclick="delRow(this)">×</button></td>
+    </tr>`;
+}
+
+function addRow(tbodyId, tplFn) {
+  const tbody = document.getElementById(tbodyId);
+  tbody.insertAdjacentHTML('beforeend', tplFn());
+  const emptyId = tbodyId.replace('-tbody', '-empty');
+  const empty = document.getElementById(emptyId);
+  if (empty) empty.style.display = 'none';
+}
+
+function delRow(btn) {
+  const tr = btn.closest('tr');
+  const tbody = tr.parentElement;
+  tr.remove();
+  if (!tbody.rows.length) {
+    const emptyId = tbody.id.replace('-tbody', '-empty');
+    const empty = document.getElementById(emptyId);
+    if (empty) empty.style.display = '';
+  }
+}
+
+function collectRows(tbodyId, fields) {
+  const tbody = document.getElementById(tbodyId);
+  return Array.from(tbody.rows).map(row => {
+    const inputs = row.querySelectorAll('input');
+    const obj = {};
+    fields.forEach((f, i) => {
+      if (inputs[i]) obj[f] = inputs[i].value.trim();
+    });
+    return obj;
+  }).filter(obj => Object.values(obj).some(v => v));
+}
+
+async function saveContext() {
+  clearStatus('ctx-status');
+  setStatus('ctx-status', 'info', 'Saving configuration…');
+
+  const rules = collectRows('rules-tbody', ['table', 'filter', 'reason', 'condition_column'])
+    .filter(r => r.table && r.filter);
+  const terms = collectRows('terms-tbody', ['term', 'meaning'])
+    .filter(t => t.term && t.meaning);
+  const warns = collectRows('warns-tbody', ['table', 'column', 'warning'])
+    .filter(w => w.table && w.column && w.warning);
+
+  const context = {
+    company_name:       document.getElementById('inp-company').value.trim(),
+    business_type:      document.getElementById('inp-btype').value.trim(),
+    data_quality_rules: rules,
+    terminology:        terms,
+    column_warnings:    warns,
+  };
+
+  try {
+    const res  = await fetch('/setup/save-context', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify(context),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      buildDoneScreen(context);
+      goTo(6);
+    } else {
+      setStatus('ctx-status', 'error', '✗ ' + data.error);
+    }
+  } catch (err) {
+    setStatus('ctx-status', 'error', '✗ ' + err.message);
+  }
+}
+
+// ── Step 5: Done ───────────────────────────────────────────────────────────
+function buildDoneScreen(context) {
+  const tables    = schemaData ? schemaData.tables : [];
+  const totalRows = tables.reduce((s, t) => s + t.row_count, 0);
+  const dbName    = schemaData ? schemaData.db_name : '—';
+
+  document.getElementById('done-subtitle').textContent =
+    `Connected to ${dbName}. OptiFlow is ready to answer your questions.`;
+
+  const grid = document.getElementById('done-grid');
+  grid.innerHTML = `
+    <div class="done-stat">
+      <div class="done-stat-val">${tables.length}</div>
+      <div class="done-stat-lbl">Tables discovered</div>
+    </div>
+    <div class="done-stat">
+      <div class="done-stat-val">${totalRows.toLocaleString()}</div>
+      <div class="done-stat-lbl">Total rows</div>
+    </div>
+    <div class="done-stat">
+      <div class="done-stat-val">${context.data_quality_rules.length}</div>
+      <div class="done-stat-lbl">Data quality rules</div>
+    </div>
+    <div class="done-stat">
+      <div class="done-stat-val">${context.terminology.length + context.column_warnings.length}</div>
+      <div class="done-stat-lbl">Terminology entries</div>
+    </div>
+  `;
+}
+
+// ── Step 4: Company Knowledge ──────────────────────────────────────────────
+async function generateKnowledge() {
+  if (!schemaData) {
+    setStatus('teach-status', 'error', 'Complete schema discovery first (Step 3).');
+    return;
+  }
+  clearStatus('teach-status');
+  const btn = document.getElementById('btn-generate');
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  setStatus('teach-status', 'info', 'Generating company knowledge draft from your schema…');
+
+  // Build a simple schema summary for the prompt
+  const schemaSummary = schemaData.tables.map(t => {
+    const cols = t.columns.slice(0, 8).map(c => c.name).join(', ');
+    return `- ${t.name} (${t.row_count.toLocaleString()} rows): ${cols}${t.columns.length > 8 ? '…' : ''}`;
+  }).join('\n');
+
+  try {
+    const res  = await fetch('/setup/generate-company-draft', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({
+        db_name: schemaData.db_name,
+        schema_summary: schemaSummary,
+      }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('inp-company-md').value = data.content;
+      clearStatus('teach-status');
+    } else {
+      setStatus('teach-status', 'error', '✗ ' + (data.error || 'Generation failed.'));
+    }
+  } catch (err) {
+    setStatus('teach-status', 'error', '✗ Network error: ' + err.message);
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Generate Draft with AI';
+}
+
+async function saveCompanyKnowledge() {
+  const content = document.getElementById('inp-company-md').value.trim();
+  if (!content) {
+    // Nothing to save — just proceed
+    goTo(5);
+    return;
+  }
+  clearStatus('teach-status');
+  setStatus('teach-status', 'info', 'Saving…');
+  try {
+    const res  = await fetch('/setup/save-company-knowledge', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({ content }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      clearStatus('teach-status');
+      goTo(5);
+    } else {
+      setStatus('teach-status', 'error', '✗ ' + data.error);
+    }
+  } catch (err) {
+    setStatus('teach-status', 'error', '✗ ' + err.message);
+  }
+}
+
+// ── Override goTo to hook in step-5 population ────────────────────────────
+const _goTo = goTo;
+window.goTo = function(n) {
+  _goTo(n);
+  if (n === 5) populateHints();
+};
+
+// ── On load: skip Step 1 if admin already exists ───────────────────────────
+(async function init() {
+  try {
+    const res  = await fetch('/setup/status');
+    const data = await res.json();
+    if (data.admin_exists) {
+      // Admin already created — skip to Step 2 (DB connection)
+      goTo(2);
+    }
+  } catch (_) { /* stay on step 1 */ }
+})();
+
+// ── Utility ────────────────────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+  </script>
+</body>
+</html>

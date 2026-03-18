@@ -2,11 +2,11 @@ DATABASE SCHEMA: Ezee_BizFlow_Original
 Server: 192.168.1.198  |  Auto-generated from live database
 ==============================================================================
 
-TABLES (25 total): AMC_MASTER, AMC_PO_DETAILS, AMC_PO_MASTER, AMC_QUOTATION_DETAILS, AMC_QUOTATION_MASTER, CLIENT_MASTER, INVOICE_DETAILS, Monthly_Target, NOTE_NOTIFICATIONS, OPERATIONS, payment_information, PERFORMANCE_EVALUATION, PERFORMANCE_SCORE, PERFORMANCE_SETTINGS, PIC_MASTER, PO_DETAILS, PO_MASTER, ProSt, QUOTATION_DETAILS, QUOTATION_MASTER, SKILL_MASTER, SPL_AND_AMC_PROJECTS, TERMS_MASTER, TICKET_DETAILS, USER_MASTER
+TABLES (26 total): AMC_MASTER, AMC_PO_DETAILS, AMC_PO_MASTER, AMC_QUOTATION_DETAILS, AMC_QUOTATION_MASTER, CLIENT_MASTER, INVOICE_DETAILS, Monthly_Target, NOTE_NOTIFICATIONS, OPERATIONS, payment_information, PERFORMANCE_EVALUATION, PERFORMANCE_SCORE, PERFORMANCE_SETTINGS, PIC_MASTER, PO_DETAILS, PO_MASTER, ProSt, QUOTATION_DETAILS, QUOTATION_MASTER, SKILL_MASTER, SPL_AND_AMC_PROJECTS, sysdiagrams, TERMS_MASTER, TICKET_DETAILS, USER_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: AMC_MASTER
-  Row count: 218
+  Row count: 217
   Columns (27):
     AmcID                               int                       NOT NULL
     ProjectCode                         nvarchar(5)               NULL
@@ -36,9 +36,7 @@ TABLE: AMC_MASTER
     Quotation_No                        nvarchar(-1)              NULL
     Po_Filename                         nvarchar(-1)              NULL
   Distinct values for key columns:
-    AMCCoverage: ['', '0', '12', '24', '6']
     Status: ['', 'Active', 'Awaiting PO', 'Under AMC', 'Under Coverage', 'Work In Progress']
-    AMC_Code: []
     Payment_Status: ['Received']
 
 ──────────────────────────────────────────────────────────────────────────────
@@ -56,9 +54,6 @@ TABLE: AMC_PO_DETAILS
     IGST                                decimal                   NULL
     Advance                             int                       NULL
     HSN_Code                            varchar(50)               NULL
-  Distinct values for key columns:
-    PO_No: []
-    HSN_Code: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: AMC_PO_MASTER
@@ -77,8 +72,6 @@ TABLE: AMC_PO_MASTER
     PO_Upload_FileName                  nvarchar(-1)              NULL
     PO_Upload                           varbinary(-1)             NULL
   Distinct values for key columns:
-    PO_No: []
-    GSTIN_No: []
     ConfirmationType: []
 
 ──────────────────────────────────────────────────────────────────────────────
@@ -94,10 +87,6 @@ TABLE: AMC_QUOTATION_DETAILS
     Rate                                decimal                   NOT NULL
     Total_Amount                        decimal                   NOT NULL
     Created_At                          datetime                  NOT NULL
-  Distinct values for key columns:
-    Quotation_No: ['ECZAPT2526A063', 'ECZBUN(P)2526A064', 'ECZFAU2526A069', 'ECZHNT2526A072', 'ECZHNT2526A073', 'ECZHSL(AP)2526A071', 'ECZHTI2526A070', 'ECZKSH2526A055', 'ECZKSP2526A001', 'ECZKSP2526A057', 'ECZLSA2526A058', 'ECZPHA2526A068', 'ECZSHN2526A067', 'ECZSLL2526A066', 'ECZTHR(P)2526A061', 'ECZTHR2526A060', 'ECZVID2526A056', 'ECZYSI2526A062', 'ECZYSI2526A065']
-    Project_Code: ['0', '001', '002', '046', '083', '128', '248', '508', '626', '661', 'A007', 'A055', 'A056', 'A057', 'A058', 'OA65', 'OA67']
-    Customer_Code: ['APT', 'BUN(P)', 'FAU', 'HNT', 'HSL(AP)', 'HTI', 'KSH', 'KSP', 'LSA', 'PHA', 'SHN', 'SLL', 'THR', 'THR(P)', 'VID', 'YSI']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: AMC_QUOTATION_MASTER
@@ -111,10 +100,6 @@ TABLE: AMC_QUOTATION_MASTER
     Terms                               nvarchar(-1)              NULL
     Quotation_Date                      date                      NOT NULL
     Created_At                          datetime                  NOT NULL
-  Distinct values for key columns:
-    Quotation_No: ['ECZAPT2526A063', 'ECZBUN(P)2526A064', 'ECZFAU2526A069', 'ECZHNT2526A072', 'ECZHNT2526A073', 'ECZHSL(AP)2526A071', 'ECZHTI2526A070', 'ECZKSH2526A055', 'ECZKSP2526A001', 'ECZKSP2526A057', 'ECZLSA2526A058', 'ECZPHA2526A068', 'ECZSHN2526A067', 'ECZSLL2526A066', 'ECZTHR(P)2526A061', 'ECZTHR2526A059', 'ECZVID2526A056', 'ECZYSI2526A062', 'ECZYSI2526A065']
-    Project_Code: ['0', '001', '002', '046', '083', '128', '248', '508', '626', '661', 'A007', 'A055', 'A056', 'A057', 'A058', 'OA65', 'OA67']
-    Customer_Code: ['APT', 'BUN(P)', 'FAU', 'HNT', 'HSL(AP)', 'HTI', 'KSH', 'KSP', 'LSA', 'PHA', 'SHN', 'SLL', 'THR', 'THR(P)', 'VID', 'YSI']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: CLIENT_MASTER
@@ -142,17 +127,11 @@ TABLE: CLIENT_MASTER
     client_Country                      varchar(50)               NULL
     client_State                        varchar(50)               NULL
   Distinct values for key columns:
-    client_PAN: ['', 'AAACT9025D', 'AACCS3003L']
-    client_TAN: []
-    client_CIN: []
-    client_TIN: []
-    client_Tax_No: []
-    client_Country: ['India']
-    client_State: ['Andhra Pradesh', 'Gujarat', 'Karnataka', 'Kerala', 'Maharashtra', 'Rajasthan', 'Tamil Nadu']
+    client_Status: ['True']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: INVOICE_DETAILS
-  Row count: 139
+  Row count: 138
   Columns (39):
     Detail_ID                           int                       NOT NULL
     Invoice_No                          varchar(50)               NULL
@@ -196,9 +175,8 @@ TABLE: INVOICE_DETAILS
   Distinct values for key columns:
     Line_Status: ['FOC', 'Invoiced', 'Payments Closed', 'Pending']
     GST_Type: ['CGST', 'IGST']
-    State_Code: ['08', '27', '29', '33', '37']
-    HSN_Code: ['', '482190', '998314', '998346']
-    sh_copy: ['0,0', '1,0', '1,1']
+    acknowledgement_type: ['verbal']
+    remainder_status: ['', '0', '1', '1,1', '1,1,1', '1,1,1,1,1,1', '1,1,1,1,1,1,1', '1,1,1,1,1,1,1,1', '1,1,1,1,1,1,1,1,1', '1,1,1,1,1,1,1,1,1,1', '1,1,1,1,1,1,1,1,1,1,1', '1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1', '1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1', '1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1', '1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1', '1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: Monthly_Target
@@ -228,15 +206,12 @@ TABLE: NOTE_NOTIFICATIONS
     Task_Assigned_To                    varchar(100)              NULL
     Task_Status                         varchar(20)               NULL
   Distinct values for key columns:
-    Tagged_User: ['', 'sal', 'sales', 'Sales,Santharaj', 'Santharaj', 'Santharaj,Sales', 'Sidharth', 'Singaraj']
-    Created_By: ['Sales', 'Santharaj', 'Sidharth', 'Singaraj']
-    Task_Assigned_To: []
     Task_Status: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: OPERATIONS
-  Row count: 80
-  Columns (14):
+  Row count: 79
+  Columns (11):
     ID                                  int                       NOT NULL
     Project_Code                        nvarchar(50)              NOT NULL
     Customer_Code                       nvarchar(50)              NOT NULL
@@ -248,15 +223,12 @@ TABLE: OPERATIONS
     TAT_Seed_Days                       int                       NULL
     TAT_Root_Days                       int                       NULL
     TAT_Ground_Days                     int                       NULL
-    Development_At                      datetime                  NULL
-    Testing_At                          datetime                  NULL
-    Implementation_At                   datetime                  NULL
   Distinct values for key columns:
     Status: ['COC', 'Development', 'Implementation', 'In Progress', 'Testing']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: payment_information
-  Row count: 140
+  Row count: 139
   Columns (11):
     payment_id                          int                       NOT NULL
     Project_Code                        varchar(50)               NOT NULL
@@ -284,6 +256,8 @@ TABLE: PERFORMANCE_EVALUATION
     CreatedBy                           nvarchar(150)             NOT NULL
     UpdatedBy                           nvarchar(150)             NULL
     Status                              int                       NULL
+  Distinct values for key columns:
+    Status: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PERFORMANCE_SCORE
@@ -297,8 +271,6 @@ TABLE: PERFORMANCE_SCORE
     Strength                            nvarchar(-1)              NULL
     Weakness                            nvarchar(-1)              NULL
     Remarks                             nvarchar(-1)              NULL
-  Distinct values for key columns:
-    EmployeeID: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PERFORMANCE_SETTINGS
@@ -319,8 +291,7 @@ TABLE: PERFORMANCE_SETTINGS
     Rating_CreatedBy                    int                       NOT NULL
     Rating_UpdatedBy                    int                       NULL
   Distinct values for key columns:
-    Rating_Name: []
-    Rating_Category: []
+    Rating_Status: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PIC_MASTER
@@ -336,6 +307,8 @@ TABLE: PIC_MASTER
     Status                              tinyint                   NOT NULL
     CreatedDate                         datetime                  NULL
     UpdatedDate                         datetime                  NULL
+  Distinct values for key columns:
+    Status: ['1']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PO_DETAILS
@@ -354,9 +327,6 @@ TABLE: PO_DETAILS
     HSN_Code                            varchar(50)               NULL
     AMC_Coverage                        date                      NULL
     AMC_Percentage                      nvarchar(20)              NULL
-  Distinct values for key columns:
-    HSN_Code: ['', '0', '998314']
-    AMC_Percentage: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PO_MASTER
@@ -372,11 +342,11 @@ TABLE: PO_MASTER
     GST_Total_Amount                    decimal                   NULL
     ConfirmationType                    varchar(20)               NULL
   Distinct values for key columns:
-    ConfirmationType: ['Email', 'PO', 'Verbal']
+    ConfirmationType: ['PO', 'Verbal']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: ProSt
-  Row count: 284
+  Row count: 283
   Columns (40):
     ID                                  int                       NOT NULL
     Project_Code                        varchar(255)              NULL
@@ -420,10 +390,6 @@ TABLE: ProSt
     Internal_PIC                        varchar(100)              NULL
   Distinct values for key columns:
     Project_Status: ['Adjusted', 'Ground', 'Held', 'Lost', 'NON PREFERRED', 'Plant', 'Root', 'Seed']
-    Project_ConfirmedBy: ['AMC', 'Email', 'FOC', 'PO', 'Verbal']
-    GSTIN: []
-    State_Code: []
-    Internal_PIC: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: QUOTATION_DETAILS
@@ -444,7 +410,7 @@ TABLE: QUOTATION_DETAILS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: QUOTATION_MASTER
-  Row count: 135
+  Row count: 134
   Columns (19):
     quotation_ID_PK                     int                       NOT NULL
     quotation_NUMBER                    nvarchar(100)             NOT NULL
@@ -465,6 +431,8 @@ TABLE: QUOTATION_MASTER
     quotation_CANCEL_REMARKS            nvarchar(500)             NULL
     quotation_ANNEXURE                  nvarchar(-1)              NULL
     quotation_FILENAME                  nvarchar(255)             NULL
+  Distinct values for key columns:
+    quotation_STATUS: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: SKILL_MASTER
@@ -475,8 +443,6 @@ TABLE: SKILL_MASTER
     Parent_Skill_ID                     int                       NULL
     Created_By                          nvarchar(100)             NULL
     Created_At                          datetime                  NULL
-  Distinct values for key columns:
-    Created_By: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: SPL_AND_AMC_PROJECTS
@@ -527,11 +493,18 @@ TABLE: SPL_AND_AMC_PROJECTS
   Distinct values for key columns:
     Line_Status: ['Invoiced', 'Payments Closed', 'Pending']
     GST_Type: ['CGST', 'IGST', 'NA']
-    State_Code: ['06', '24', '27', '29', '33', '37']
-    HSN_Code: ['998216', '998314', '998346']
-    AMC_Percentage: []
-    sh_copy: ['0,0', '1,0', '1,1']
-    EWOP: ['11 of 2026', '14 of 2026', '15 of 2026', '6 of 2026', '8 of 2026', '9 of 2026']
+    acknowledgement_type: ['mail', 'verbal']
+    remainder_status: ['0', '1', '1,0', '1,1']
+
+──────────────────────────────────────────────────────────────────────────────
+TABLE: sysdiagrams
+  Row count: 1
+  Columns (5):
+    name                                nvarchar(128)             NOT NULL
+    principal_id                        int                       NOT NULL
+    diagram_id                          int                       NOT NULL
+    version                             int                       NULL
+    definition                          varbinary(-1)             NULL
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: TERMS_MASTER
@@ -545,6 +518,8 @@ TABLE: TERMS_MASTER
     tc_UpdatedDate                      datetime                  NULL
     tc_software                         nvarchar(-1)              NULL
     tc_hardware                         nvarchar(-1)              NULL
+  Distinct values for key columns:
+    tc_Status: ['1']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: TICKET_DETAILS
@@ -569,9 +544,6 @@ TABLE: TICKET_DETAILS
     Close_Comment                       nvarchar(-1)              NULL
     Last_Approval_Notify                datetime                  NULL
   Distinct values for key columns:
-    Ticket_ID: ['TKTGEN001', 'TKTGEN004', 'TKTGEN005', 'TKTGEN007', 'TKTGEN008', 'TKTGEN009', 'TKTGEN010', 'TKTGEN011', 'TKTGEN012']
-    Assigned_To: ['Aswinth', 'Sales', 'Sidharth', 'Sowndarya', 'Srini', 'Srinivasan S']
-    Assigned_By: ['Sales', 'Santharaj']
     Priority: ['High']
     Ticket_Status: ['Closed', 'In Progress', 'Resolved']
 
@@ -590,7 +562,13 @@ TABLE: USER_MASTER
     LastName                            nvarchar(-1)              NULL
     Department                          nvarchar(-1)              NULL
     Reporting_To                        varchar(100)              NULL
-  Distinct values for key columns:
-    Username: ['Abarna', 'Ajay', 'Anbu', 'Aswinth', 'Chandramuki', 'Fazil Basha', 'Karthikeyan', 'Meena Krishnan', 'Mohanapriya', 'Mukesh', 'Nirmalkumar', 'Nithin Rodda', 'rakeshwaran', 'Sales', 'Santharaj', 'Sidharth', 'Singaraj', 'Sowndarya', 'Srini', 'Srinivasan S', 'testing', 'Theraj', 'Vignesh', 'Vijay', 'Wester Anantharaj']
-    Employee_ID: ['', 'ECZ014', 'ECZ033', 'ECZ034', 'NA']
-    Reporting_To: ['Sales', 'Santharaj', 'Sidharth', 'Sowndarya']
+
+──────────────────────────────────────────────────────────────────────────────
+FOREIGN KEY RELATIONSHIPS:
+  AMC_PO_DETAILS.PO_No → AMC_PO_MASTER.PO_No  (FK: FK_AMC_PO)
+  PERFORMANCE_SCORE.EvaluationID → PERFORMANCE_EVALUATION.EvaluationID  (FK: FK_PerformanceScore_Evaluation)
+  PERFORMANCE_SETTINGS.Rating_CreatedBy → USER_MASTER.ID  (FK: FK_PerformanceSettings_CreatedBy)
+  PERFORMANCE_SETTINGS.Rating_UpdatedBy → USER_MASTER.ID  (FK: FK_PerformanceSettings_UpdatedBy)
+  PO_DETAILS.PO_No → PO_MASTER.PO_No  (FK: FK_PO)
+  SKILL_MASTER.Parent_Skill_ID → SKILL_MASTER.ID  (FK: FK_Skill_Parent)
+

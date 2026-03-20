@@ -20,10 +20,7 @@ import os
 import re
 from datetime import date
 
-import anthropic
-
-from config.loader import load_model_config
-from config.settings import ANTHROPIC_API_KEY
+from config.ai_client import get_completion
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +34,6 @@ _COMPANY_MD_PATH = os.path.join(_ROOT, "config", "company.md")
 
 # Regex to strip ```json ... ``` wrappers Claude sometimes adds.
 _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?\s*```$", re.DOTALL)
-
-_client     = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY or "not-configured")
-_AGENT_MODEL = load_model_config().get("agent_mode", {}).get("model", "claude-sonnet-4-6")
 
 
 def _load_schema() -> str:
@@ -283,15 +277,13 @@ Return ONLY valid JSON, no markdown.
 
 
 def _call_claude(system_prompt: str, user_message: str, max_tokens: int = 2000) -> str:
-    """Call Claude API and return raw text response."""
-    response = _client.messages.create(
-        model=_AGENT_MODEL,
+    """Call the configured AI provider and return raw text response."""
+    return get_completion(
+        system=system_prompt,
+        user=user_message,
         max_tokens=max_tokens,
         temperature=0,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}],
     )
-    return response.content[0].text.strip()
 
 
 def _parse_json_response(text: str) -> dict | None:
@@ -340,8 +332,8 @@ def generate_sql(question: str) -> dict:
     try:
         text = _call_claude(system_prompt, question, max_tokens=1000)
     except Exception as e:
-        logger.error(f"Claude API call failed: {e}")
-        return _error_result(explanation=f"Claude API call failed: {e}", warnings=["API error — please retry."])
+        logger.error(f"AI call failed: {e}")
+        return _error_result(explanation=f"AI call failed: {e}", warnings=["API error — please retry."])
 
     result = _parse_json_response(text)
     if not result:
@@ -380,8 +372,8 @@ def generate_chain(question: str) -> dict:
     try:
         text = _call_claude(system_prompt, question, max_tokens=2000)
     except Exception as e:
-        logger.error(f"Claude API call failed (chain): {e}")
-        return {**_error_result(explanation=f"Claude API call failed: {e}", warnings=["API error — please retry."]), "mode": "single"}
+        logger.error(f"AI call failed (chain): {e}")
+        return {**_error_result(explanation=f"AI call failed: {e}", warnings=["API error — please retry."]), "mode": "single"}
 
     result = _parse_json_response(text)
     if not result:
@@ -440,8 +432,8 @@ def generate_business_health_chain(question: str = "") -> dict:
     try:
         text = _call_claude(system_prompt, user_message, max_tokens=2500)
     except Exception as e:
-        logger.error(f"Claude API call failed (health chain): {e}")
-        return {**_error_result(explanation=f"Claude API call failed: {e}", warnings=["API error — please retry."]), "mode": "chain", "steps": [], "summary_prompt": ""}
+        logger.error(f"AI call failed (health chain): {e}")
+        return {**_error_result(explanation=f"AI call failed: {e}", warnings=["API error — please retry."]), "mode": "chain", "steps": [], "summary_prompt": ""}
 
     result = _parse_json_response(text)
     if not result:
@@ -512,7 +504,7 @@ def generate_deep_dive_chain(entity_label: str, question: str = "") -> dict:
     try:
         text = _call_claude(system_prompt, user_message, max_tokens=2500)
     except Exception as e:
-        logger.error(f"Claude API call failed (deep dive): {e}")
+        logger.error(f"AI call failed (deep dive): {e}")
         return {
             "mode":           "deep_dive",
             "entity_label":   entity_label,

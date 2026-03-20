@@ -18,37 +18,43 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # ── Status check ─────────────────────────────────────────────────────────────
 
 def is_setup_complete() -> bool:
-    """Return True when prompts/schema_context.txt exists (minimum viable setup).
+    """Return True when both the schema file and AI config exist.
 
-    Existing installs that already have a schema file are considered complete
-    and skip the wizard entirely.
+    Both conditions must be met:
+    1. prompts/schema_context.txt  — DB was discovered
+    2. config/model_config.json with cloud_provider key — AI was configured
+
+    Existing installs that have the schema but not the new model_config are
+    redirected to the setup wizard to complete the AI Provider step.
     """
     schema_path = os.path.join(_ROOT, "prompts", "schema_context.txt")
-    return os.path.exists(schema_path)
+    if not os.path.exists(schema_path):
+        return False
+
+    model_cfg_path = os.path.join(_ROOT, "config", "model_config.json")
+    if os.path.exists(model_cfg_path):
+        try:
+            with open(model_cfg_path, encoding="utf-8") as f:
+                cfg = json.load(f)
+            if "cloud_provider" in cfg:
+                return True
+        except Exception:
+            pass
+
+    return False
 
 
 # ── Credentials ───────────────────────────────────────────────────────────────
 
 def save_db_credentials(server: str, database: str, user: str, password: str) -> None:
-    """Write/merge DB credentials into .env, preserving other settings."""
-    env_path = os.path.join(_ROOT, ".env")
-    existing: dict = {}
-    if os.path.exists(env_path):
-        with open(env_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if "=" in line and not line.startswith("#"):
-                    k, _, v = line.partition("=")
-                    existing[k.strip()] = v.strip()
-
-    existing["DB_SERVER"]   = server
-    existing["DB_NAME"]     = database
-    existing["DB_USER"]     = user
-    existing["DB_PASSWORD"] = password
-
-    with open(env_path, "w", encoding="utf-8") as f:
-        for k, v in existing.items():
-            f.write(f"{k}={v}\n")
+    """Save DB credentials to config/db_config.json (encrypted password)."""
+    from config.loader import save_db_config
+    save_db_config({
+        "server":   server,
+        "database": database,
+        "user":     user,
+        "password": password,
+    })
 
 
 # ── Connection ────────────────────────────────────────────────────────────────

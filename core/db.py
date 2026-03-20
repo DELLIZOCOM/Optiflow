@@ -1,21 +1,40 @@
 import pyodbc
 import time
 import logging
-from config.settings import DB_SERVER, DB_NAME, DB_USER, DB_PASSWORD
 
 logger = logging.getLogger(__name__)
+
+
+def _get_credentials():
+    """Load DB credentials from config/db_config.json at call time.
+
+    Falls back to module-level settings for backward compat with .env installs.
+    Reading fresh on each call ensures chat queries work immediately after setup
+    without a server restart.
+    """
+    from config.loader import load_db_config
+    cfg = load_db_config()
+    if cfg.get("server"):
+        return cfg["server"], cfg["database"], cfg["user"], cfg["password"]
+
+    # Legacy fallback: read from config.settings (which may still read .env)
+    from config.settings import DB_SERVER, DB_NAME, DB_USER, DB_PASSWORD
+    return DB_SERVER, DB_NAME, DB_USER, DB_PASSWORD
+
 
 def get_connection():
     """
     Establishes a connection to the SQL Server database.
     Includes retry logic for transient connection errors.
     """
+    server, database, user, password = _get_credentials()
+
     connection_string = (
         f"DRIVER={{ODBC Driver 18 for SQL Server}};"
-        f"SERVER={DB_SERVER},1433;"
-        f"DATABASE={DB_NAME};"
-        f"UID={DB_USER};"
-        f"PWD={DB_PASSWORD};"
+        f"SERVER={server},1433;"
+        f"DATABASE={database};"
+        f"UID={user};"
+        f"PWD={password};"
         f"TrustServerCertificate=yes;"
         f"Encrypt=optional"
     )
@@ -35,14 +54,15 @@ def get_connection():
                 logger.error("Max retries reached. Could not connect to the database.")
                 raise e
 
+
 def execute_query(sql, params=None):
     """
     Executes a SQL query and returns the results as a list of dictionaries.
-    
+
     Args:
         sql (str): The SQL query string.
         params (tuple, optional): Parameters to pass to the query (to prevent SQL injection).
-        
+
     Returns:
         list[dict]: A list of dictionaries representing the result set.
     """
@@ -50,17 +70,17 @@ def execute_query(sql, params=None):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        
+
         if params:
             cursor.execute(sql, params)
         else:
             cursor.execute(sql)
-            
+
         columns = [column[0] for column in cursor.description]
         results = []
         for row in cursor.fetchall():
             results.append(dict(zip(columns, row)))
-            
+
         return results
     except Exception as e:
         logger.error(f"Error executing query: {e}")
@@ -68,6 +88,7 @@ def execute_query(sql, params=None):
     finally:
         if conn:
             conn.close()
+
 
 if __name__ == '__main__':
     # Setup basic logging for standalone execution

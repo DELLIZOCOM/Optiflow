@@ -1,6 +1,10 @@
 # Secrets and credentials
 .env
 config/users.json
+config/.secret
+config/model_config.json
+config/db_config.json
+config/security.json
 
 # Sensitive logs
 logs/audit.jsonl

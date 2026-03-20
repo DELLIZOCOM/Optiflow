@@ -3,6 +3,7 @@ uvicorn
 jinja2
 pyodbc
 anthropic
-python-dotenv
+openai
+cryptography
 requests
 bcrypt

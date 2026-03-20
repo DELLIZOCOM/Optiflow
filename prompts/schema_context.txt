@@ -6,7 +6,7 @@ TABLES (25 total): AMC_MASTER, AMC_PO_DETAILS, AMC_PO_MASTER, AMC_QUOTATION_DETA
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: AMC_MASTER
-  Row count: 218
+  Row count: 219
   Columns (27):
     AmcID                               int                       NOT NULL
     ProjectCode                         nvarchar(5)               NULL
@@ -118,7 +118,7 @@ TABLE: AMC_QUOTATION_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: CLIENT_MASTER
-  Row count: 124
+  Row count: 126
   Columns (21):
     client_ID_PK                        int                       NOT NULL
     client_Name                         nvarchar(200)             NOT NULL
@@ -152,7 +152,7 @@ TABLE: CLIENT_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: INVOICE_DETAILS
-  Row count: 139
+  Row count: 141
   Columns (39):
     Detail_ID                           int                       NOT NULL
     Invoice_No                          varchar(50)               NULL
@@ -324,7 +324,7 @@ TABLE: PERFORMANCE_SETTINGS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PIC_MASTER
-  Row count: 137
+  Row count: 138
   Columns (10):
     ID                                  int                       NOT NULL
     Name                                nvarchar(255)             NOT NULL
@@ -376,7 +376,7 @@ TABLE: PO_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: ProSt
-  Row count: 284
+  Row count: 287
   Columns (40):
     ID                                  int                       NOT NULL
     Project_Code                        varchar(255)              NULL
@@ -427,7 +427,7 @@ TABLE: ProSt
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: QUOTATION_DETAILS
-  Row count: 226
+  Row count: 231
   Columns (12):
     trans_ID_PK                         int                       NOT NULL
     cliend_ID_PK                        nvarchar(50)              NULL
@@ -444,7 +444,7 @@ TABLE: QUOTATION_DETAILS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: QUOTATION_MASTER
-  Row count: 135
+  Row count: 140
   Columns (19):
     quotation_ID_PK                     int                       NOT NULL
     quotation_NUMBER                    nvarchar(100)             NOT NULL

@@ -1,10 +1,9 @@
 """
-Intent parser — calls Claude API to extract intent from natural language.
+Intent parser — calls the configured AI provider to extract intent from natural language.
 
-Takes a user question string, sends it to Claude with the OptiFlow system
-prompt, and returns a parsed intent dict like {'intent': 'amc_expiry', 'days': 60}.
-This module ONLY talks to the Claude API. It does not touch the database,
-query engine, or response formatter.
+Takes a user question string, sends it with the OptiFlow system prompt, and returns
+a parsed intent dict like {'intent': 'agent', 'match_confidence': 'high'}.
+This module ONLY talks to the AI API. It does not touch the database.
 """
 
 import json
@@ -12,10 +11,7 @@ import logging
 import os
 import re
 
-import anthropic
-
-from config.loader import load_model_config
-from config.settings import ANTHROPIC_API_KEY
+from config.ai_client import get_completion
 
 logger = logging.getLogger(__name__)
 
@@ -28,19 +24,8 @@ _PROMPT_PATH = os.path.join(
 with open(_PROMPT_PATH) as _f:
     _SYSTEM_PROMPT = _f.read()
 
-# Regex to strip ```json ... ``` wrappers Claude sometimes adds.
+# Regex to strip ```json ... ``` wrappers the model sometimes adds.
 _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?\s*```$", re.DOTALL)
-
-# Load model from config (fallback model for intent parser — used when Ollama fails)
-_CLOUD_MODEL = (
-    load_model_config()
-    .get("intent_parser", {})
-    .get("fallback", {})
-    .get("model", "claude-sonnet-4-20250514")
-)
-
-_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY or "not-configured")
-
 
 _VALID_CONFIDENCE = {"high", "medium", "low"}
 
@@ -58,23 +43,21 @@ def parse(question: str) -> dict:
         On failure returns {'intent': 'unknown', 'error': '...', 'original': question,
         'match_confidence': 'low'}.
     """
-    logger.info("PARSER: Claude API")
+    logger.info("PARSER: Cloud AI")
     if not question or not question.strip():
         return {"intent": "unknown", "error": "empty_question",
                 "original": question, "match_confidence": "low"}
 
-    # Call Claude API
+    # Call configured AI provider
     try:
-        response = _client.messages.create(
-            model=_CLOUD_MODEL,
+        text = get_completion(
+            system=_SYSTEM_PROMPT,
+            user=question,
             max_tokens=200,
             temperature=0,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": question}],
         )
-        text = response.content[0].text.strip()
     except Exception as e:
-        logger.error(f"Claude API call failed: {e}")
+        logger.error(f"AI API call failed: {e}")
         return {"intent": "unknown", "error": "api_failed",
                 "original": question, "match_confidence": "low"}
 

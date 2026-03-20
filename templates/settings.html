@@ -114,6 +114,33 @@
 
     .badge-red    { background: #ffe3e3; color: #c92a2a; }
     .badge-yellow { background: #fff3bf; color: #7a5800; }
+    .badge-gray   { background: #e9ecef; color: #495057; }
+
+    .inline-form {
+      display: none;
+      margin-top: 12px;
+      padding: 14px;
+      background: #f7f8fa;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+    }
+    .inline-form.show { display: block; }
+    .inline-form label { font-size: 12px; font-weight: 600; color: #555; display: block; margin-bottom: 4px; }
+    .inline-form input, .inline-form select {
+      width: 100%; padding: 8px 10px; border: 1px solid #d0d0d0; border-radius: 6px;
+      font-size: 13px; margin-bottom: 10px; font-family: inherit;
+    }
+    .inline-form .row-pair { display: flex; gap: 10px; }
+    .inline-form .row-pair > div { flex: 1; }
+    .btn-sm {
+      padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 600;
+      border: none; cursor: pointer;
+    }
+    .btn-sm-primary { background: #4c6ef5; color: #fff; }
+    .btn-sm-primary:hover { background: #3b5bdb; }
+    .btn-sm-secondary { background: #e9ecef; color: #333; margin-left: 6px; }
+    .btn-sm-secondary:hover { background: #dee2e6; }
+    .status-inline { font-size: 12px; margin-top: 6px; }
 
     .perm-list {
       font-size: 12.5px;
@@ -159,36 +186,68 @@
         <div class="row-label">Password</div>
         <div class="row-value">
           <span style="color:#aaa; font-family:inherit;">••••••••</span>
-          <div class="secret-note">stored in .env — never displayed</div>
+          <div class="secret-note">encrypted in config/db_config.json — never displayed</div>
         </div>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-header">AI Configuration</div>
+      <div class="card-header">AI Provider</div>
       <div class="row">
-        <div class="row-label">Intent Parser</div>
+        <div class="row-label">Provider</div>
         <div class="row-value">
-          {% if intent_mode == 'local' %}
-            <span class="badge badge-orange">local (Ollama)</span>
-          {% else %}
-            <span class="badge badge-blue">cloud (Claude API)</span>
-          {% endif %}
+          <span class="badge badge-blue">{{ ai_provider or '—' }}</span>
         </div>
       </div>
       <div class="row">
-        <div class="row-label">Response Model</div>
-        <div class="row-value"><span class="badge badge-blue">{{ response_model }}</span></div>
-      </div>
-      <div class="row">
-        <div class="row-label">Agent SQL Model</div>
-        <div class="row-value"><span class="badge badge-blue">{{ agent_model }}</span></div>
+        <div class="row-label">Model</div>
+        <div class="row-value"><span class="badge badge-blue">{{ ai_model or '—' }}</span></div>
       </div>
       <div class="row">
         <div class="row-label">API Key</div>
+        <div class="row-value" style="flex:1;">
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <span style="font-family:monospace; color:#aaa;">••••••••</span><span style="font-family:monospace; font-weight:700; color:#1a1a2e;">{{ ai_key_hint or '' }}</span>
+            <button class="btn-sm btn-sm-secondary" onclick="toggleKeyForm()">Change API Key</button>
+          </div>
+          <div class="inline-form" id="key-form">
+            <div class="row-pair">
+              <div>
+                <label>Provider</label>
+                <select id="kf-provider" onchange="kfProviderChange()">
+                  <option value="anthropic" {% if ai_provider == 'anthropic' %}selected{% endif %}>Anthropic (Claude)</option>
+                  <option value="openai"    {% if ai_provider == 'openai' %}selected{% endif %}>OpenAI</option>
+                  <option value="custom"    {% if ai_provider == 'custom' %}selected{% endif %}>Custom endpoint</option>
+                </select>
+              </div>
+              <div>
+                <label>Model</label>
+                <input type="text" id="kf-model" value="{{ ai_model or '' }}" placeholder="claude-sonnet-4-20250514">
+              </div>
+            </div>
+            <div id="kf-endpoint-group" style="display:{% if ai_provider == 'custom' %}block{% else %}none{% endif %};">
+              <label>Endpoint URL (OpenAI-compatible)</label>
+              <input type="text" id="kf-endpoint" placeholder="https://api.example.com/v1">
+            </div>
+            <label>New API Key</label>
+            <input type="password" id="kf-key" placeholder="sk-ant-..." autocomplete="new-password">
+            <div>
+              <button class="btn-sm btn-sm-primary" onclick="verifyAndSaveKey()">Verify &amp; Save</button>
+              <button class="btn-sm btn-sm-secondary" onclick="toggleKeyForm()">Cancel</button>
+            </div>
+            <div class="status-inline" id="kf-status"></div>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="row-label">Local Intent Parser</div>
         <div class="row-value">
-          <span style="color:#aaa; font-family:inherit;">••••••••</span>
-          <div class="secret-note">stored in .env — never displayed</div>
+          {% if local_enabled %}
+            <span class="badge badge-orange">enabled (Ollama)</span>
+            <div class="secret-note">{{ local_endpoint }} — model: {{ local_model }}</div>
+          {% else %}
+            <span class="badge badge-gray">disabled</span>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -298,5 +357,54 @@
 
   </div>
 
+<script>
+function toggleKeyForm() {
+  const form = document.getElementById('key-form');
+  form.classList.toggle('show');
+}
+
+function kfProviderChange() {
+  const provider = document.getElementById('kf-provider').value;
+  document.getElementById('kf-endpoint-group').style.display =
+    provider === 'custom' ? 'block' : 'none';
+}
+
+async function verifyAndSaveKey() {
+  const provider  = document.getElementById('kf-provider').value;
+  const model     = document.getElementById('kf-model').value.trim();
+  const api_key   = document.getElementById('kf-key').value.trim();
+  const endpoint  = (document.getElementById('kf-endpoint') || {}).value || '';
+  const statusEl  = document.getElementById('kf-status');
+
+  if (!api_key) {
+    statusEl.style.color = '#c92a2a';
+    statusEl.textContent = '✗ Please enter a new API key.';
+    return;
+  }
+
+  statusEl.style.color = '#555';
+  statusEl.textContent = 'Verifying…';
+
+  try {
+    const res  = await fetch('/admin/update-ai-config', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({ provider, api_key, model, custom_endpoint: endpoint }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      statusEl.style.color = '#2b8a3e';
+      statusEl.textContent = '✓ Saved! Reload to see updated settings.';
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      statusEl.style.color = '#c92a2a';
+      statusEl.textContent = '✗ ' + (data.error || 'Update failed.');
+    }
+  } catch (err) {
+    statusEl.style.color = '#c92a2a';
+    statusEl.textContent = '✗ Network error: ' + err.message;
+  }
+}
+</script>
 </body>
 </html>

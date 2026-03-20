@@ -435,19 +435,19 @@
         </div>
         <div class="step-dot" id="dot-2">
           <div class="step-circle">2</div>
-          <div class="step-label">Connect</div>
+          <div class="step-label">AI</div>
         </div>
         <div class="step-dot" id="dot-3">
           <div class="step-circle">3</div>
-          <div class="step-label">Discover</div>
+          <div class="step-label">Connect</div>
         </div>
         <div class="step-dot" id="dot-4">
           <div class="step-circle">4</div>
-          <div class="step-label">Teach</div>
+          <div class="step-label">Discover</div>
         </div>
         <div class="step-dot" id="dot-5">
           <div class="step-circle">5</div>
-          <div class="step-label">Configure</div>
+          <div class="step-label">Teach</div>
         </div>
         <div class="step-dot" id="dot-6">
           <div class="step-circle">6</div>
@@ -484,10 +484,94 @@
         </div>
       </div>
 
-      <!-- ── Step 2: Database Connection ───────────────────────────────── -->
+      <!-- ── Step 2: Configure AI Provider ─────────────────────────────── -->
       <div class="panel hidden" id="panel-2">
+        <div class="panel-title">Configure AI Provider</div>
+        <div class="panel-subtitle">
+          OptiFlow uses an AI model for SQL generation and result interpretation.
+          Your API key is encrypted and stored in <code>config/model_config.json</code> — never in .env.
+        </div>
+
+        <div style="margin-bottom:20px;">
+          <div style="font-size:13px;font-weight:700;color:#1a1a2e;margin-bottom:10px;">Cloud AI — SQL Generation &amp; Interpretation</div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Provider</label>
+              <select id="inp-ai-provider" onchange="onProviderChange()" style="
+                width:100%; padding:9px 12px; border:1px solid #d0d0d0;
+                border-radius:7px; font-size:13px; background:#fff; color:#1a1a2e; outline:none;
+              ">
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="openai">OpenAI</option>
+                <option value="custom">Custom endpoint</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Model</label>
+              <input type="text" id="inp-ai-model" placeholder="claude-sonnet-4-20250514" autocomplete="off">
+            </div>
+          </div>
+
+          <div class="form-group" id="ai-endpoint-group" style="display:none;">
+            <label>Endpoint URL (OpenAI-compatible)</label>
+            <input type="text" id="inp-ai-endpoint" placeholder="https://api.example.com/v1" autocomplete="off">
+          </div>
+
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" id="inp-ai-key" placeholder="sk-ant-..." autocomplete="off">
+          </div>
+
+          <div class="status" id="ai-test-status"></div>
+          <div style="display:flex; gap:10px; align-items:center; margin-top:8px;">
+            <button class="btn btn-secondary" id="btn-test-ai" onclick="testAiKey()">Test API Key</button>
+            <span style="font-size:12px;color:#888;">Sends one minimal request to verify the key works.</span>
+          </div>
+        </div>
+
+        <div style="border-top:1px solid #e8e8e8; padding-top:18px; margin-top:4px;">
+          <div style="font-size:13px;font-weight:700;color:#1a1a2e;margin-bottom:6px;">Local AI — Intent Parsing (Optional)</div>
+          <div style="font-size:12px;color:#888;margin-bottom:12px;">
+            Use a local Ollama model for faster basic routing. Falls back to cloud AI automatically.
+          </div>
+
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;margin:0;">
+              <input type="checkbox" id="chk-local" onchange="onLocalToggle()" style="width:16px;height:16px;cursor:pointer;">
+              Use local model for faster basic routing
+            </label>
+          </div>
+
+          <div id="local-fields" style="display:none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Ollama endpoint</label>
+                <input type="text" id="inp-ollama-url" value="http://localhost:11434" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label>Model</label>
+                <input type="text" id="inp-ollama-model" value="qwen3:8b" autocomplete="off">
+              </div>
+            </div>
+            <div class="status" id="ollama-test-status"></div>
+            <div style="display:flex; gap:10px; align-items:center; margin-top:8px;">
+              <button class="btn btn-secondary" id="btn-test-ollama" onclick="testOllama()">Test Connection</button>
+              <span style="font-size:12px;color:#888;">Checks if Ollama is running at the given endpoint.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="goTo(1)">← Back</button>
+          <button class="btn btn-primary" id="btn-next-2" onclick="saveAiConfig()" disabled>Save &amp; Continue →</button>
+        </div>
+      </div>
+
+      <!-- ── Step 3: Database Connection ────────────────────────────────── -->
+      <div class="panel hidden" id="panel-3">
         <div class="panel-title">Database Connection</div>
-        <div class="panel-subtitle">Enter your SQL Server credentials. OptiFlow will save them to .env.</div>
+        <div class="panel-subtitle">Enter your SQL Server credentials. They'll be encrypted and saved to <code>config/db_config.json</code>.</div>
 
         <div class="form-row">
           <div class="form-group">
@@ -531,12 +615,12 @@
 
         <div class="btn-row">
           <button class="btn btn-secondary" id="btn-test" onclick="testConnection()">Test Connection</button>
-          <button class="btn btn-primary" id="btn-next-2" onclick="goTo(3)" disabled>Continue →</button>
+          <button class="btn btn-primary" id="btn-next-3" onclick="goTo(4)" disabled>Continue →</button>
         </div>
       </div>
 
-      <!-- ── Step 3: Schema Discovery ──────────────────────────────────── -->
-      <div class="panel hidden" id="panel-3">
+      <!-- ── Step 4: Schema Discovery ───────────────────────────────────── -->
+      <div class="panel hidden" id="panel-4">
         <div class="panel-title">Schema Discovery</div>
         <div class="panel-subtitle" id="disc-subtitle">OptiFlow will scan your database tables, columns, and sample values to build its understanding of your data.</div>
 
@@ -549,13 +633,13 @@
         <div id="tables-grid" class="table-grid" style="display:none;"></div>
 
         <div class="btn-row">
-          <button class="btn btn-secondary" onclick="goTo(2)">← Back</button>
-          <button class="btn btn-primary" id="btn-next-3" onclick="goTo(4)" disabled>Continue →</button>
+          <button class="btn btn-secondary" onclick="goTo(3)">← Back</button>
+          <button class="btn btn-primary" id="btn-next-4" onclick="goTo(5)" disabled>Continue →</button>
         </div>
       </div>
 
-      <!-- ── Step 4: Company Knowledge ──────────────────────────────────── -->
-      <div class="panel hidden" id="panel-4">
+      <!-- ── Step 5: Company Knowledge ──────────────────────────────────── -->
+      <div class="panel hidden" id="panel-5">
         <div class="panel-title">Teach OptiFlow About Your Business</div>
         <div class="panel-subtitle">
           Describe your business so OptiFlow writes better queries. This file (<code>config/company.md</code>)
@@ -580,91 +664,9 @@
         </div>
 
         <div class="btn-row">
-          <button class="btn btn-secondary" onclick="goTo(3)">← Back</button>
-          <button class="btn btn-secondary" onclick="goTo(5)">Skip →</button>
-          <button class="btn btn-primary" onclick="saveCompanyKnowledge()">Save &amp; Continue →</button>
-        </div>
-      </div>
-
-      <!-- ── Step 5: Business Context (Configure) ────────────────────────── -->
-      <div class="panel hidden" id="panel-5">
-        <div class="panel-title">Configure OptiFlow</div>
-        <div class="panel-subtitle">Tell OptiFlow about your business so it generates better queries. Everything here is optional — you can edit <code>config/business_context.json</code> at any time.</div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label>Company name</label>
-            <input type="text" id="inp-company" placeholder="Acme Corp">
-          </div>
-          <div class="form-group">
-            <label>Business type</label>
-            <input type="text" id="inp-btype" placeholder="Manufacturing / SaaS / Retail…">
-          </div>
-        </div>
-
-        <!-- Schema Hints (collapsible, auto-populated from discovery) -->
-        <div class="hints-header" id="hints-header" onclick="toggleHints()">
-          <span>Schema Hints (discovered enum values)</span>
-          <span class="chevron">▼</span>
-        </div>
-        <div class="hints-body" id="hints-body"></div>
-
-        <!-- Data quality rules -->
-        <div class="section-header">
-          <span class="section-title">Data Quality Rules</span>
-          <button class="btn-add" onclick="addRow('rules-tbody', rulesRowTpl)">+ Add Rule</button>
-        </div>
-        <p style="font-size:12px;color:#888;margin-bottom:8px;">SQL WHERE-clause conditions for tables with known data issues (e.g. test records or migration artifacts).</p>
-        <table class="rule-table">
-          <thead><tr>
-            <th style="width:20%">Table</th>
-            <th style="width:36%">Filter condition</th>
-            <th style="width:28%">Reason</th>
-            <th style="width:12%">Cond. col</th>
-            <th></th>
-          </tr></thead>
-          <tbody id="rules-tbody"></tbody>
-        </table>
-        <div class="empty-hint" id="rules-empty">No rules yet — add one above if needed.</div>
-
-        <!-- Terminology -->
-        <div class="section-header">
-          <span class="section-title">Terminology</span>
-          <button class="btn-add" onclick="addRow('terms-tbody', termsRowTpl)">+ Add Term</button>
-        </div>
-        <p style="font-size:12px;color:#888;margin-bottom:8px;">Domain-specific terms so the AI understands your business language (e.g. "COC = Certificate of Completion").</p>
-        <table class="rule-table">
-          <thead><tr>
-            <th style="width:30%">Term</th>
-            <th>Meaning</th>
-            <th></th>
-          </tr></thead>
-          <tbody id="terms-tbody"></tbody>
-        </table>
-        <div class="empty-hint" id="terms-empty">No terms yet.</div>
-
-        <!-- Column warnings -->
-        <div class="section-header">
-          <span class="section-title">Column Warnings</span>
-          <button class="btn-add" onclick="addRow('warns-tbody', warnsRowTpl)">+ Add Warning</button>
-        </div>
-        <p style="font-size:12px;color:#888;margin-bottom:8px;">Flag columns with data quality issues so the AI avoids them (e.g. a date column that's mostly NULL).</p>
-        <table class="rule-table">
-          <thead><tr>
-            <th style="width:20%">Table</th>
-            <th style="width:20%">Column</th>
-            <th>Warning note</th>
-            <th></th>
-          </tr></thead>
-          <tbody id="warns-tbody"></tbody>
-        </table>
-        <div class="empty-hint" id="warns-empty">No warnings yet.</div>
-
-        <div class="status" id="ctx-status"></div>
-
-        <div class="btn-row">
           <button class="btn btn-secondary" onclick="goTo(4)">← Back</button>
-          <button class="btn btn-primary" onclick="saveContext()">Save &amp; Continue →</button>
+          <button class="btn btn-secondary" onclick="goTo(6)">Skip →</button>
+          <button class="btn btn-primary" onclick="saveCompanyKnowledge()">Save &amp; Continue →</button>
         </div>
       </div>
 
@@ -698,6 +700,7 @@ function goTo(n) {
     dot.classList.toggle('active', i === n);
     dot.classList.toggle('done',   i < n);
   }
+  if (n === 6) buildDoneScreen();
   window.scrollTo(0, 0);
 }
 
@@ -833,7 +836,7 @@ async function checkPermissions(server, database, user, password) {
   document.getElementById('perm-title').textContent = 'Checking permissions…';
   document.getElementById('perm-detail').textContent = '';
 
-  const btn = document.getElementById('btn-next-2');
+  const btn = document.getElementById('btn-next-3');
   btn.disabled = true;
 
   try {
@@ -949,7 +952,7 @@ async function discoverSchema() {
       document.getElementById('disc-subtitle').textContent =
         `Connected to ${data.db_name} on ${data.server}`;
 
-      document.getElementById('btn-next-3').disabled = false;
+      document.getElementById('btn-next-4').disabled = false;
       document.getElementById('btn-disc').style.display = 'none';
     } else {
       setStatus('disc-status', 'error', '✗ ' + data.error);
@@ -1069,46 +1072,8 @@ function collectRows(tbodyId, fields) {
   }).filter(obj => Object.values(obj).some(v => v));
 }
 
-async function saveContext() {
-  clearStatus('ctx-status');
-  setStatus('ctx-status', 'info', 'Saving configuration…');
-
-  const rules = collectRows('rules-tbody', ['table', 'filter', 'reason', 'condition_column'])
-    .filter(r => r.table && r.filter);
-  const terms = collectRows('terms-tbody', ['term', 'meaning'])
-    .filter(t => t.term && t.meaning);
-  const warns = collectRows('warns-tbody', ['table', 'column', 'warning'])
-    .filter(w => w.table && w.column && w.warning);
-
-  const context = {
-    company_name:       document.getElementById('inp-company').value.trim(),
-    business_type:      document.getElementById('inp-btype').value.trim(),
-    data_quality_rules: rules,
-    terminology:        terms,
-    column_warnings:    warns,
-  };
-
-  try {
-    const res  = await fetch('/setup/save-context', {
-      method:  'POST',
-      headers: {'Content-Type': 'application/json'},
-      body:    JSON.stringify(context),
-    });
-    const data = await res.json();
-
-    if (data.success) {
-      buildDoneScreen(context);
-      goTo(6);
-    } else {
-      setStatus('ctx-status', 'error', '✗ ' + data.error);
-    }
-  } catch (err) {
-    setStatus('ctx-status', 'error', '✗ ' + err.message);
-  }
-}
-
-// ── Step 5: Done ───────────────────────────────────────────────────────────
-function buildDoneScreen(context) {
+// ── Step 6: Done ───────────────────────────────────────────────────────────
+function buildDoneScreen() {
   const tables    = schemaData ? schemaData.tables : [];
   const totalRows = tables.reduce((s, t) => s + t.row_count, 0);
   const dbName    = schemaData ? schemaData.db_name : '—';
@@ -1126,15 +1091,153 @@ function buildDoneScreen(context) {
       <div class="done-stat-val">${totalRows.toLocaleString()}</div>
       <div class="done-stat-lbl">Total rows</div>
     </div>
-    <div class="done-stat">
-      <div class="done-stat-val">${context.data_quality_rules.length}</div>
-      <div class="done-stat-lbl">Data quality rules</div>
-    </div>
-    <div class="done-stat">
-      <div class="done-stat-val">${context.terminology.length + context.column_warnings.length}</div>
-      <div class="done-stat-lbl">Terminology entries</div>
-    </div>
   `;
+}
+
+// ── Step 2: AI Provider ─────────────────────────────────────────────────────
+const _DEFAULT_MODELS = {
+  anthropic: 'claude-sonnet-4-20250514',
+  openai:    'gpt-4o',
+  custom:    '',
+};
+
+function onProviderChange() {
+  const provider = document.getElementById('inp-ai-provider').value;
+  const modelEl  = document.getElementById('inp-ai-model');
+  const epGroup  = document.getElementById('ai-endpoint-group');
+  if (!modelEl.value || Object.values(_DEFAULT_MODELS).includes(modelEl.value)) {
+    modelEl.value = _DEFAULT_MODELS[provider] || '';
+  }
+  epGroup.style.display = provider === 'custom' ? '' : 'none';
+  _updateAiNextBtn();
+}
+
+function onLocalToggle() {
+  const enabled = document.getElementById('chk-local').checked;
+  document.getElementById('local-fields').style.display = enabled ? '' : 'none';
+}
+
+function _updateAiNextBtn() {
+  const key = document.getElementById('inp-ai-key').value.trim();
+  document.getElementById('btn-next-2').disabled = !key;
+}
+
+// Wire up oninput on the key field to enable/disable Continue button.
+document.addEventListener('DOMContentLoaded', function() {
+  const keyEl = document.getElementById('inp-ai-key');
+  if (keyEl) keyEl.addEventListener('input', _updateAiNextBtn);
+  // Set initial model default.
+  const modelEl = document.getElementById('inp-ai-model');
+  if (modelEl && !modelEl.value) modelEl.value = _DEFAULT_MODELS.anthropic;
+});
+
+async function testAiKey() {
+  const provider  = document.getElementById('inp-ai-provider').value;
+  const api_key   = document.getElementById('inp-ai-key').value.trim();
+  const model     = document.getElementById('inp-ai-model').value.trim();
+  const endpoint  = document.getElementById('inp-ai-endpoint').value.trim();
+
+  if (!api_key) {
+    setStatus('ai-test-status', 'error', '✗ Please enter an API key first.');
+    return;
+  }
+
+  const btn = document.getElementById('btn-test-ai');
+  btn.disabled = true;
+  btn.textContent = 'Testing…';
+  clearStatus('ai-test-status');
+  setStatus('ai-test-status', 'info', 'Sending test request…');
+
+  try {
+    const res  = await fetch('/setup/test-ai-provider', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({ provider, api_key, model, custom_endpoint: endpoint }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      setStatus('ai-test-status', 'success', '✓ API key works! You can continue.');
+      document.getElementById('btn-next-2').disabled = false;
+    } else {
+      setStatus('ai-test-status', 'error', '✗ ' + (data.error || 'Test failed.'));
+    }
+  } catch (err) {
+    setStatus('ai-test-status', 'error', '✗ Network error: ' + err.message);
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Test API Key';
+}
+
+async function testOllama() {
+  const endpoint = document.getElementById('inp-ollama-url').value.trim();
+  const btn = document.getElementById('btn-test-ollama');
+  btn.disabled = true;
+  btn.textContent = 'Testing…';
+  clearStatus('ollama-test-status');
+  setStatus('ollama-test-status', 'info', 'Connecting to Ollama…');
+
+  try {
+    const res  = await fetch('/setup/test-ollama', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({ endpoint }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      const modelList = data.models && data.models.length
+        ? ' Models: ' + data.models.slice(0, 4).join(', ')
+        : '';
+      setStatus('ollama-test-status', 'success', '✓ Ollama is reachable.' + modelList);
+    } else {
+      setStatus('ollama-test-status', 'error', '✗ ' + (data.error || 'Could not connect.'));
+    }
+  } catch (err) {
+    setStatus('ollama-test-status', 'error', '✗ Network error: ' + err.message);
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Test Connection';
+}
+
+async function saveAiConfig() {
+  const provider       = document.getElementById('inp-ai-provider').value;
+  const api_key        = document.getElementById('inp-ai-key').value.trim();
+  const model          = document.getElementById('inp-ai-model').value.trim();
+  const custom_endpoint = document.getElementById('inp-ai-endpoint').value.trim();
+  const local_enabled  = document.getElementById('chk-local').checked;
+  const local_endpoint = document.getElementById('inp-ollama-url').value.trim();
+  const local_model    = document.getElementById('inp-ollama-model').value.trim();
+
+  if (!api_key) {
+    setStatus('ai-test-status', 'error', '✗ Please enter an API key.');
+    return;
+  }
+
+  const btn = document.getElementById('btn-next-2');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    const res  = await fetch('/setup/save-ai-config', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({ provider, api_key, model, custom_endpoint,
+                                local_enabled, local_endpoint, local_model }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      goTo(3);
+    } else {
+      setStatus('ai-test-status', 'error', '✗ ' + (data.error || 'Save failed.'));
+      btn.disabled = false;
+      btn.textContent = 'Save & Continue →';
+    }
+  } catch (err) {
+    setStatus('ai-test-status', 'error', '✗ Network error: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = 'Save & Continue →';
+  }
 }
 
 // ── Step 4: Company Knowledge ──────────────────────────────────────────────
@@ -1183,7 +1286,7 @@ async function saveCompanyKnowledge() {
   const content = document.getElementById('inp-company-md').value.trim();
   if (!content) {
     // Nothing to save — just proceed
-    goTo(5);
+    goTo(6);
     return;
   }
   clearStatus('teach-status');
@@ -1197,7 +1300,7 @@ async function saveCompanyKnowledge() {
     const data = await res.json();
     if (data.success) {
       clearStatus('teach-status');
-      goTo(5);
+      goTo(6);
     } else {
       setStatus('teach-status', 'error', '✗ ' + data.error);
     }
@@ -1206,20 +1309,13 @@ async function saveCompanyKnowledge() {
   }
 }
 
-// ── Override goTo to hook in step-5 population ────────────────────────────
-const _goTo = goTo;
-window.goTo = function(n) {
-  _goTo(n);
-  if (n === 5) populateHints();
-};
-
 // ── On load: skip Step 1 if admin already exists ───────────────────────────
 (async function init() {
   try {
     const res  = await fetch('/setup/status');
     const data = await res.json();
     if (data.admin_exists) {
-      // Admin already created — skip to Step 2 (DB connection)
+      // Admin already created — skip to Step 2 (AI config)
       goTo(2);
     }
   } catch (_) { /* stay on step 1 */ }

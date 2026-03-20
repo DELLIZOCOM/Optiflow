@@ -1,51 +1,65 @@
-# Company Knowledge
-
-This file teaches OptiFlow AI about your business. It is included in every
-SQL generation prompt so the AI writes better, more context-aware queries.
-
-Complete this file during setup (Step 4) or edit it later at /admin/company.
-
----
-
 ## Business Overview
 
-<!-- What does your company do? What industry are you in? -->
-<!-- Example: "We are a software services company. We manage projects, invoices, and AMC contracts for enterprise clients." -->
+Based on the database structure, this appears to be a **project-based service business** that likely provides IT services, software development, or technical consulting. The company manages client projects from quotation through delivery, handles Annual Maintenance Contracts (AMCs), processes invoices and payments, and tracks employee performance. The "Ezee_BizFlow" name suggests it's designed to streamline business operations and workflow management.
 
+*Note: This is an educated guess based on the data structure. Please update this section with your actual business description.*
 
 ## Key Tables and What They Mean
 
-<!-- Explain what your most important tables contain and how they relate. -->
-<!-- Example:
-- Orders table: customer purchase orders, each row is one order line
-- Customers table: master list of all client companies
-- Products table: our product catalog
--->
+**Core Business Operations:**
+- **ProSt** - Main project status tracking table with project codes, titles, customers, and sales amounts
+- **OPERATIONS** - Project operational details including start dates (PSD), delivery dates (PDD), and status
+- **CLIENT_MASTER** - Customer information including company details, tax IDs, and contact information
+- **PIC_MASTER** - "Person in Charge" - likely your internal team members assigned to projects
 
+**Sales and Quotations:**
+- **QUOTATION_MASTER/DETAILS** - Customer quotes and line items
+- **AMC_QUOTATION_MASTER/DETAILS** - Quotes specifically for Annual Maintenance Contracts
 
-## Terminology
+**Orders and Invoicing:**
+- **PO_MASTER/DETAILS** - Purchase orders from customers
+- **INVOICE_DETAILS** - Invoice line items and billing information
+- **payment_information** - Payment tracking and receivables
 
-<!-- Define any business terms or column values that need explanation. -->
-<!-- Example:
-- "FOC" means "Free of Charge" (zero-value invoice)
-- "PIC" = Person In Charge (customer-side contact, not our staff)
-- Project status values: Seed (lead), Root (quoted), Ground (PO received), Plant (completed)
--->
+**Ongoing Services:**
+- **AMC_MASTER** - Annual Maintenance Contract management
+- **SPL_AND_AMC_PROJECTS** - Special projects and AMC-related work
 
+**Internal Management:**
+- **Monthly_Target** - Department-wise sales targets and achievements
+- **USER_MASTER** - Employee login and access management
+- **TICKET_DETAILS** - Internal task/support ticket system
+- **NOTE_NOTIFICATIONS** - Project communications and notifications
 
-## Data Quality Rules
+## Important Terminology
 
-<!-- Any filters that should ALWAYS be applied to avoid dirty/test data. -->
-<!-- Example:
-- The Orders table has test orders created on 2024-01-01 — always exclude them with: Created_Date != '2024-01-01'
-- The Projects table includes cancelled projects with Status = 'Cancelled' — exclude unless specifically asked
--->
+- **Project_Code** - Unique identifier used across multiple tables to link project-related data
+- **AMC** - Annual Maintenance Contract (ongoing service agreements)
+- **PIC** - Person in Charge (internal project manager/lead)
+- **PSD/PDD** - Likely "Project Start Date" and "Project Delivery Date"
+- **GSTIN** - Goods and Services Tax Identification Number (Indian tax system)
+- **PO** - Purchase Order
+- **CGST/SGST** - Central/State Goods and Services Tax (Indian tax components)
 
+## Data Quality Notes
 
-## Important Relationships
+*Please review and update the following based on your actual data:*
 
-<!-- How do key tables join together? -->
-<!-- Example:
-- Orders JOIN Customers ON Orders.CustomerCode = Customers.Code
-- Projects JOIN Invoices ON Projects.ProjectCode = Invoices.ProjectCode
--->
+**Empty Tables to Investigate:**
+- Performance evaluation tables (PERFORMANCE_EVALUATION, PERFORMANCE_SCORE, PERFORMANCE_SETTINGS) are empty
+- AMC purchase order tables (AMC_PO_MASTER, AMC_PO_DETAILS) are empty
+- SKILL_MASTER table is empty
+
+**Data Validation Needed:**
+- Check for consistent Project_Code formatting across tables
+- Verify customer information completeness in CLIENT_MASTER
+- Review payment tracking accuracy in payment_information
+- Confirm all active projects have assigned PICs
+
+**Potential Issues to Monitor:**
+- Invoice and payment reconciliation
+- Project status updates and timeline tracking
+- AMC renewal and billing cycles
+- User access and privilege management
+
+*Update this section with specific data quality issues you discover during implementation.*

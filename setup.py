@@ -23,6 +23,7 @@ def main() -> None:
     print("╚══════════════════════════════════════════╝")
     print()
 
+    from config.loader import save_ai_config, save_db_config
     from core.setup_manager import (
         get_db_connection,
         run_schema_discovery,
@@ -30,8 +31,41 @@ def main() -> None:
         save_db_credentials,
     )
 
-    # ── Step 1: Credentials ──────────────────────────────────────────────────
-    print("Step 1 of 4: Database Credentials")
+    # ── Step 1: AI Provider ──────────────────────────────────────────────────
+    print("Step 1 of 5: AI Provider")
+    print("─" * 42)
+    print("  Supported providers: anthropic, openai, custom")
+    provider = input("  Provider [anthropic]         : ").strip() or "anthropic"
+    api_key  = input("  API Key                      : ").strip()
+    if provider == "anthropic":
+        default_model = "claude-sonnet-4-20250514"
+    elif provider == "openai":
+        default_model = "gpt-4o"
+    else:
+        default_model = ""
+    model = input(f"  Model [{default_model}]  : ").strip() or default_model
+    custom_endpoint = ""
+    if provider == "custom":
+        custom_endpoint = input("  Endpoint URL                 : ").strip()
+
+    if not api_key:
+        print("\n✗ API key is required. Exiting.")
+        sys.exit(1)
+
+    save_ai_config({
+        "provider": provider,
+        "api_key":  api_key,
+        "model":    model,
+        "custom_endpoint": custom_endpoint,
+        "local_enabled": False,
+        "local_endpoint": "http://localhost:11434",
+        "local_model": "qwen3:8b",
+    })
+    print("  ✓ AI config saved to config/model_config.json (key encrypted)")
+
+    # ── Step 2: Credentials ──────────────────────────────────────────────────
+    print()
+    print("Step 2 of 5: Database Credentials")
     print("─" * 42)
     server   = input("  SQL Server host / IP address : ").strip()
     database = input("  Database name                : ").strip()
@@ -42,9 +76,9 @@ def main() -> None:
         print("\n✗ All fields are required. Exiting.")
         sys.exit(1)
 
-    # ── Step 2: Connect and discover schema ──────────────────────────────────
+    # ── Step 3: Connect and discover schema ──────────────────────────────────
     print()
-    print("Step 2 of 4: Connecting and discovering schema")
+    print("Step 3 of 5: Connecting and discovering schema")
     print("─" * 42)
 
     conn, driver, error = get_db_connection(server, database, user, password)
@@ -57,15 +91,15 @@ def main() -> None:
 
     print(f"  Connected via {driver}")
     save_db_credentials(server, database, user, password)
-    print("  ✓ Credentials saved to .env")
+    print("  ✓ Credentials saved to config/db_config.json (password encrypted)")
 
     schema_data = run_schema_discovery(conn, database, server)
     tables = schema_data["tables"]
     print(f"  ✓ Schema saved to prompts/schema_context.txt ({len(tables)} tables)")
 
-    # ── Step 3: Generate business context template ───────────────────────────
+    # ── Step 4: Generate business context template ───────────────────────────
     print()
-    print("Step 3 of 4: Generating domain configuration")
+    print("Step 4 of 5: Generating domain configuration")
     print("─" * 42)
 
     config_path = os.path.join(_ROOT, "config", "business_context.json")
@@ -87,9 +121,9 @@ def main() -> None:
     print("  ► Edit config/business_context.json with your business rules.")
     print("    This teaches OptiFlow your data quality rules and terminology.")
 
-    # ── Step 4: Test query ───────────────────────────────────────────────────
+    # ── Step 5: Test query ───────────────────────────────────────────────────
     print()
-    print("Step 4 of 4: Testing connection")
+    print("Step 5 of 5: Testing connection")
     print("─" * 42)
 
     largest = max(tables, key=lambda t: t["row_count"], default=None)

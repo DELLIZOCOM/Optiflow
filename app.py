@@ -3,14 +3,17 @@ OptiFlow AI — FastAPI server.
 
 GET  /                      → setup wizard (first run) or chat UI (after setup)
 GET  /setup/status          → {"setup_complete": bool}
+POST /setup/test-ai-provider → verify AI API key
+POST /setup/save-ai-config  → save AI provider config to model_config.json
+POST /setup/test-ollama     → test local Ollama connection
 POST /setup/test-connection → test DB credentials
-POST /setup/discover-schema → run schema discovery, save .env + schema file
-POST /setup/save-context    → save business_context.json
+POST /setup/discover-schema → run schema discovery, save db_config.json + schema file
 POST /setup/save-company-knowledge → save config/company.md
 POST /ask     → classify intent → cache → approved log → generate SQL → return for approval
-POST /approve → execute approved SQL (single, chain, or deep_dive) → interpret via Claude
+POST /approve → execute approved SQL (single, chain, or deep_dive) → interpret
 POST /reject  → log user rejection of generated SQL
 GET  /admin/company         → view/edit company knowledge (admin only)
+POST /admin/update-ai-config → update AI provider config (admin only)
 """
 
 import asyncio
@@ -30,8 +33,8 @@ from fastapi.templating import Jinja2Templates
 
 import core.auth as auth
 from config import settings
-from config.loader import load_model_config
-from config.settings import ANTHROPIC_API_KEY
+from config.loader import load_model_config, load_ai_config, save_ai_config
+from config.ai_client import get_completion, test_connection as test_ai_connection
 from core.setup_manager import (
     get_db_connection,
     is_setup_complete,
@@ -52,10 +55,6 @@ import core.approved_queries as approved_queries
 import core.audit_logger as audit_logger
 import core.query_cache as query_cache
 from core.db import execute_query
-if settings.INTENT_PARSER_MODE == "local":
-    from core.local_intent_parser import parse
-else:
-    from core.intent_parser import parse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -72,7 +71,22 @@ AGENT_TIMEOUT    = 30   # seconds — approved SQL execution + interpretation
 CHAIN_TIMEOUT    = 90   # seconds — multi-step chain execution + interpretation
 WELCOME_TIMEOUT  = 15   # seconds
 
-_anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY or "not-configured")
+def _get_anthropic_client():
+    """Return a fresh Anthropic client with the currently configured API key."""
+    ai_cfg = load_ai_config()
+    key = ai_cfg.get("api_key") or ""
+    return anthropic.Anthropic(api_key=key or "not-configured")
+
+
+def _parse(question: str) -> dict:
+    """Dispatch to local or cloud intent parser based on current AI config."""
+    ai_cfg = load_ai_config()
+    if ai_cfg.get("local_enabled"):
+        from core.local_intent_parser import parse as _local
+        return _local(question)
+    from core.intent_parser import parse as _cloud
+    return _cloud(question)
+
 
 # ── Session store ─────────────────────────────────────────────────────────────
 # token (64-char hex) → {username, created_at, last_active}
@@ -108,7 +122,10 @@ def _create_session(username: str) -> str:
     return token
 
 
-_RESPONSE_MODEL = load_model_config().get("response_interpreter", {}).get("model", "claude-sonnet-4-6")
+def _get_response_model() -> str:
+    """Return the currently configured response model name."""
+    ai_cfg = load_ai_config()
+    return ai_cfg.get("model", "claude-sonnet-4-6")
 
 
 def _json_default(obj):
@@ -198,10 +215,7 @@ def _run_welcome() -> dict:
     if knowledge:
         # Use LLM to generate a personalized welcome based on company.md
         try:
-            response = _anthropic_client.messages.create(
-                model=_RESPONSE_MODEL,
-                max_tokens=200,
-                temperature=0,
+            body = get_completion(
                 system=(
                     "You are a business intelligence assistant. "
                     "Write a short (2-3 sentence) welcome message for a user logging in. "
@@ -210,15 +224,13 @@ def _run_welcome() -> dict:
                     "End with 'Ask me anything or type your question below.' "
                     "Do NOT make up data or statistics. Be friendly and concise."
                 ),
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        f"Time of day: {greeting.lower().replace('good ', '')}. "
-                        f"Company knowledge:\n{knowledge[:800]}"
-                    ),
-                }],
+                user=(
+                    f"Time of day: {greeting.lower().replace('good ', '')}. "
+                    f"Company knowledge:\n{knowledge[:800]}"
+                ),
+                max_tokens=200,
+                temperature=0,
             )
-            body = response.content[0].text.strip()
             message = f"{greeting}! {body}"
         except Exception as e:
             logger.warning(f"Welcome LLM call failed: {e}")
@@ -256,10 +268,7 @@ def _interpret_results(question: str, rows: list, total_rows: int) -> str:
     knowledge = _load_company_knowledge()
     knowledge_note = f"\n\nCompany context:\n{knowledge[:600]}" if knowledge else ""
 
-    response = _anthropic_client.messages.create(
-        model=_RESPONSE_MODEL,
-        max_tokens=600,
-        temperature=0,
+    return get_completion(
         system=(
             "You are a business analyst interpreting database query results for a non-technical manager. "
             "Format your response as clear markdown with:\n"
@@ -270,16 +279,14 @@ def _interpret_results(question: str, rows: list, total_rows: int) -> str:
             "If two values are within 10% of each other, describe them as comparable."
             f"{knowledge_note}"
         ),
-        messages=[{
-            "role": "user",
-            "content": (
-                f"The user asked: {question}\n\n"
-                f"{row_note}"
-                f"Query results ({len(display_rows)} rows shown):\n{rows_json}"
-            ),
-        }],
+        user=(
+            f"The user asked: {question}\n\n"
+            f"{row_note}"
+            f"Query results ({len(display_rows)} rows shown):\n{rows_json}"
+        ),
+        max_tokens=600,
+        temperature=0,
     )
-    return response.content[0].text.strip()
 
 
 def _run_agent_approval(question: str, sql: str, tables_used: list) -> dict:
@@ -347,10 +354,7 @@ def _interpret_chain_results(
     knowledge = _load_company_knowledge()
     knowledge_note = f"\n\nCompany context:\n{knowledge[:600]}" if knowledge else ""
 
-    response = _anthropic_client.messages.create(
-        model=_RESPONSE_MODEL,
-        max_tokens=800,
-        temperature=0,
+    return get_completion(
         system=(
             "You are a business analyst interpreting multi-step database query results for a non-technical manager. "
             "Format your response as clear markdown with:\n"
@@ -362,12 +366,10 @@ def _interpret_chain_results(
             "Report exact figures — do not round or estimate."
             f"{knowledge_note}"
         ),
-        messages=[{
-            "role": "user",
-            "content": f"{summary_prompt}\n\n{context}",
-        }],
+        user=f"{summary_prompt}\n\n{context}",
+        max_tokens=800,
+        temperature=0,
     )
-    return response.content[0].text.strip()
 
 
 def _run_chain_approval(
@@ -444,7 +446,7 @@ def _run_pipeline(question: str) -> dict:
     """Classify intent → route to appropriate agent chain."""
     t0 = time.perf_counter()
 
-    intent_dict = parse(question)
+    intent_dict = _parse(question)
     intent_name = intent_dict.get("intent", "unknown")
     logger.info(f"Parsed intent: {intent_dict}")
 
@@ -741,6 +743,77 @@ def _setup_auth_check(request: Request):
     return None
 
 
+@app.post("/setup/test-ai-provider")
+async def setup_test_ai_provider(request: Request):
+    """Verify an AI API key by making a minimal API call."""
+    if (err := _setup_auth_check(request)):
+        return err
+    body = await request.json()
+    provider         = body.get("provider", "anthropic").strip()
+    api_key          = body.get("api_key", "").strip()
+    model            = body.get("model", "").strip()
+    custom_endpoint  = body.get("custom_endpoint", "").strip()
+
+    if not api_key:
+        return _safe_json({"success": False, "error": "API key is required."})
+    if not model:
+        return _safe_json({"success": False, "error": "Model name is required."})
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None, test_ai_connection, provider, api_key, model, custom_endpoint
+    )
+    return _safe_json(result)
+
+
+@app.post("/setup/save-ai-config")
+async def setup_save_ai_config(request: Request):
+    """Save AI provider configuration to config/model_config.json."""
+    if (err := _setup_auth_check(request)):
+        return err
+    body = await request.json()
+    data = {
+        "provider":        body.get("provider", "anthropic").strip(),
+        "api_key":         body.get("api_key", "").strip(),
+        "model":           body.get("model", "").strip(),
+        "custom_endpoint": body.get("custom_endpoint", "").strip(),
+        "local_enabled":   bool(body.get("local_enabled", False)),
+        "local_endpoint":  body.get("local_endpoint", "http://localhost:11434").strip(),
+        "local_model":     body.get("local_model", "qwen3:8b").strip(),
+    }
+    if not data["api_key"]:
+        return _safe_json({"success": False, "error": "API key is required."})
+    if not data["model"]:
+        return _safe_json({"success": False, "error": "Model name is required."})
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, save_ai_config, data)
+        return _safe_json({"success": True})
+    except Exception as e:
+        logger.error(f"save-ai-config error: {e}")
+        return _safe_json({"success": False, "error": str(e)})
+
+
+@app.post("/setup/test-ollama")
+async def setup_test_ollama(request: Request):
+    """Test if a local Ollama instance is running at the given endpoint."""
+    if (err := _setup_auth_check(request)):
+        return err
+    body     = await request.json()
+    endpoint = body.get("endpoint", "http://localhost:11434").strip().rstrip("/")
+
+    import requests as _requests
+    try:
+        resp = _requests.get(f"{endpoint}/api/tags", timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+        models = [m.get("name") for m in data.get("models", [])]
+        return _safe_json({"success": True, "models": models})
+    except Exception as e:
+        return _safe_json({"success": False, "error": f"Cannot reach Ollama at {endpoint}: {e}"})
+
+
 @app.post("/setup/test-connection")
 async def setup_test_connection(request: Request):
     if (err := _setup_auth_check(request)):
@@ -891,10 +964,7 @@ async def setup_generate_company_draft(request: Request):
         return _safe_json({"success": False, "error": "No schema summary provided."})
 
     try:
-        response = _anthropic_client.messages.create(
-            model=_RESPONSE_MODEL,
-            max_tokens=1200,
-            temperature=0,
+        content = get_completion(
             system=(
                 "You are helping set up a business intelligence tool. "
                 "Generate a company.md knowledge file in markdown format. "
@@ -909,16 +979,14 @@ async def setup_generate_company_draft(request: Request):
                 "Do NOT add a title line (the user will see the filename). "
                 "Write in plain English, not technical jargon."
             ),
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Database name: {db_name}\n\n"
-                    f"Tables discovered:\n{schema_summary}\n\n"
-                    "Generate the company knowledge file."
-                ),
-            }],
+            user=(
+                f"Database name: {db_name}\n\n"
+                f"Tables discovered:\n{schema_summary}\n\n"
+                "Generate the company knowledge file."
+            ),
+            max_tokens=1200,
+            temperature=0,
         )
-        content = response.content[0].text.strip()
         return _safe_json({"success": True, "content": content})
     except Exception as e:
         logger.error(f"generate-company-draft error: {e}")
@@ -1141,8 +1209,11 @@ async def admin_settings(request: Request):
     if not user_obj or user_obj.get("role") != "admin":
         return HTMLResponse("<h3>403 Forbidden — admin access required.</h3>", status_code=403)
 
-    # ── Gather config — never include secrets ─────────────────────────────
-    model_cfg = load_model_config()
+    # ── Gather config — never include raw secrets ──────────────────────────
+    ai_cfg = load_ai_config()
+
+    from config.loader import load_db_config as _ldc
+    db_cfg = _ldc()
 
     # Count approved queries (line count of JSONL file)
     aq_path  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "approved_queries.jsonl")
@@ -1165,12 +1236,17 @@ async def admin_settings(request: Request):
 
     ctx = {
         "request":           request,
-        "db_server":         settings.DB_SERVER or "(not configured)",
-        "db_name":           settings.DB_NAME   or "(not configured)",
-        "db_user":           settings.DB_USER   or "(not configured)",
-        "intent_mode":       settings.INTENT_PARSER_MODE,
-        "response_model":    model_cfg.get("response_interpreter", {}).get("model", "(default)"),
-        "agent_model":       model_cfg.get("agent_sql_generator", {}).get("model", "(default)"),
+        "db_server":         db_cfg.get("server")   or "(not configured)",
+        "db_name":           db_cfg.get("database") or "(not configured)",
+        "db_user":           db_cfg.get("user")     or "(not configured)",
+        # AI provider
+        "ai_provider":       ai_cfg.get("provider", "anthropic"),
+        "ai_model":          ai_cfg.get("model", "—"),
+        "ai_key_hint":       ai_cfg.get("api_key_hint", ""),
+        "local_enabled":     ai_cfg.get("local_enabled", False),
+        "local_model":       ai_cfg.get("local_model", ""),
+        "local_endpoint":    ai_cfg.get("local_endpoint", ""),
+        # Runtime
         "cache_size":        query_cache.size(),
         "approved_count":    aq_count,
         "uptime":            uptime_str,
@@ -1178,6 +1254,59 @@ async def admin_settings(request: Request):
         "company_md_exists": company_md_exists,
     }
     return templates.TemplateResponse("settings.html", ctx)
+
+
+# ── Admin: update AI config ───────────────────────────────────────────────────
+
+@app.post("/admin/update-ai-config")
+async def admin_update_ai_config(request: Request):
+    """Update AI provider configuration. Tests the key before saving."""
+    session = _check_session(request)
+    if not session:
+        return _safe_json({"success": False, "error": "Not authenticated."})
+
+    user_obj = auth.find_user(session["username"])
+    if not user_obj or user_obj.get("role") != "admin":
+        return _safe_json({"success": False, "error": "Admin access required."})
+
+    body = await request.json()
+    provider        = body.get("provider", "anthropic").strip()
+    api_key         = body.get("api_key", "").strip()
+    model           = body.get("model", "").strip()
+    custom_endpoint = body.get("custom_endpoint", "").strip()
+
+    if not api_key:
+        return _safe_json({"success": False, "error": "API key is required."})
+    if not model:
+        return _safe_json({"success": False, "error": "Model name is required."})
+
+    # Test the key before saving
+    loop = asyncio.get_event_loop()
+    test_result = await loop.run_in_executor(
+        None, test_ai_connection, provider, api_key, model, custom_endpoint
+    )
+    if not test_result["success"]:
+        return _safe_json({"success": False, "error": f"Key verification failed: {test_result.get('error')}"})
+
+    # Preserve local provider settings
+    current = load_ai_config()
+    data = {
+        "provider":        provider,
+        "api_key":         api_key,
+        "model":           model,
+        "custom_endpoint": custom_endpoint,
+        "local_enabled":   current.get("local_enabled", False),
+        "local_endpoint":  current.get("local_endpoint", "http://localhost:11434"),
+        "local_model":     current.get("local_model", "qwen3:8b"),
+    }
+    try:
+        await loop.run_in_executor(None, save_ai_config, data)
+        actor = session["username"]
+        audit_logger.log_action(actor, "update_ai_config", {"provider": provider, "model": model})
+        return _safe_json({"success": True})
+    except Exception as e:
+        logger.error(f"update-ai-config error: {e}")
+        return _safe_json({"success": False, "error": str(e)})
 
 
 # ── Admin: company knowledge editor ──────────────────────────────────────────

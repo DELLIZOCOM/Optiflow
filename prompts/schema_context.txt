@@ -6,7 +6,7 @@ TABLES (25 total): AMC_MASTER, AMC_PO_DETAILS, AMC_PO_MASTER, AMC_QUOTATION_DETA
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: AMC_MASTER
-  Row count: 219
+  Row count: 222
   Columns (27):
     AmcID                               int                       NOT NULL
     ProjectCode                         nvarchar(5)               NULL
@@ -36,7 +36,7 @@ TABLE: AMC_MASTER
     Quotation_No                        nvarchar(-1)              NULL
     Po_Filename                         nvarchar(-1)              NULL
   Distinct values for key columns:
-    AMCCoverage: ['', '0', '12', '24', '6']
+    AMCCoverage: ['', '0', '12', '2', '24', '6']
     Status: ['', 'Active', 'Awaiting PO', 'Under AMC', 'Under Coverage', 'Work In Progress']
     AMC_Code: []
     Payment_Status: ['Received']
@@ -152,7 +152,7 @@ TABLE: CLIENT_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: INVOICE_DETAILS
-  Row count: 141
+  Row count: 140
   Columns (39):
     Detail_ID                           int                       NOT NULL
     Invoice_No                          varchar(50)               NULL
@@ -235,8 +235,8 @@ TABLE: NOTE_NOTIFICATIONS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: OPERATIONS
-  Row count: 80
-  Columns (14):
+  Row count: 82
+  Columns (18):
     ID                                  int                       NOT NULL
     Project_Code                        nvarchar(50)              NOT NULL
     Customer_Code                       nvarchar(50)              NOT NULL
@@ -251,12 +251,16 @@ TABLE: OPERATIONS
     Development_At                      datetime                  NULL
     Testing_At                          datetime                  NULL
     Implementation_At                   datetime                  NULL
+    TAT_Implementation_Days             int                       NULL
+    TAT_Testing_Days                    int                       NULL
+    TAT_Solution_Days                   int                       NULL
+    TAT_Development_Days                int                       NULL
   Distinct values for key columns:
     Status: ['COC', 'Development', 'Implementation', 'In Progress', 'Testing']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: payment_information
-  Row count: 140
+  Row count: 147
   Columns (11):
     payment_id                          int                       NOT NULL
     Project_Code                        varchar(50)               NOT NULL
@@ -302,7 +306,7 @@ TABLE: PERFORMANCE_SCORE
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PERFORMANCE_SETTINGS
-  Row count: 0
+  Row count: 5
   Columns (14):
     Rating_ID                           bigint                    NOT NULL
     Rating_Name                         varchar(64)               NOT NULL
@@ -319,8 +323,8 @@ TABLE: PERFORMANCE_SETTINGS
     Rating_CreatedBy                    int                       NOT NULL
     Rating_UpdatedBy                    int                       NULL
   Distinct values for key columns:
-    Rating_Name: []
-    Rating_Category: []
+    Rating_Name: ['Star 1', 'Star 2', 'Star 3', 'Star 4', 'Star 5']
+    Rating_Category: ['Belonginess & Ownership', 'Delivery', 'HR (Attitude & Attendance)', 'Quality of Delivery', 'Revenue & Business Impact']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PIC_MASTER
@@ -339,7 +343,7 @@ TABLE: PIC_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PO_DETAILS
-  Row count: 136
+  Row count: 138
   Columns (13):
     PO_Detail_ID                        int                       NOT NULL
     PO_No                               varchar(50)               NOT NULL
@@ -360,7 +364,7 @@ TABLE: PO_DETAILS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PO_MASTER
-  Row count: 88
+  Row count: 90
   Columns (9):
     PO_ID                               int                       NOT NULL
     PO_No                               varchar(50)               NOT NULL
@@ -376,8 +380,8 @@ TABLE: PO_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: ProSt
-  Row count: 287
-  Columns (40):
+  Row count: 289
+  Columns (41):
     ID                                  int                       NOT NULL
     Project_Code                        varchar(255)              NULL
     Project_Status                      varchar(50)               NOT NULL
@@ -418,16 +422,17 @@ TABLE: ProSt
     Ground_Description                  nvarchar(-1)              NULL
     Plant_Description                   nvarchar(-1)              NULL
     Internal_PIC                        varchar(100)              NULL
+    AMC_Exists                          bit                       NULL
   Distinct values for key columns:
     Project_Status: ['Adjusted', 'Ground', 'Held', 'Lost', 'NON PREFERRED', 'Plant', 'Root', 'Seed']
-    Project_ConfirmedBy: ['AMC', 'Email', 'FOC', 'PO', 'Verbal']
+    Project_ConfirmedBy: ['AMC', 'FOC', 'PO', 'Verbal']
     GSTIN: []
     State_Code: []
     Internal_PIC: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: QUOTATION_DETAILS
-  Row count: 231
+  Row count: 235
   Columns (12):
     trans_ID_PK                         int                       NOT NULL
     cliend_ID_PK                        nvarchar(50)              NULL
@@ -444,7 +449,7 @@ TABLE: QUOTATION_DETAILS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: QUOTATION_MASTER
-  Row count: 140
+  Row count: 143
   Columns (19):
     quotation_ID_PK                     int                       NOT NULL
     quotation_NUMBER                    nvarchar(100)             NOT NULL
@@ -480,7 +485,7 @@ TABLE: SKILL_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: SPL_AND_AMC_PROJECTS
-  Row count: 114
+  Row count: 112
   Columns (42):
     Detail_ID                           int                       NOT NULL
     Invoice_No                          varchar(50)               NULL

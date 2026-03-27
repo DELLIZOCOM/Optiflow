@@ -406,6 +406,27 @@
     .agent-running span:nth-child(2) { animation-delay: 0.2s; }
     .agent-running span:nth-child(3) { animation-delay: 0.4s; }
 
+    /* ── Rate-limit countdown notice ── */
+    .rl-notice {
+      background: #fff9db;
+      border: 1px solid #f0c000;
+      border-radius: 10px;
+      padding: 14px 20px;
+      margin: 8px 0;
+      text-align: center;
+      color: #7a5800;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .rl-countdown {
+      display: block;
+      font-size: 28px;
+      font-weight: 800;
+      color: #5c4000;
+      margin-top: 4px;
+      font-variant-numeric: tabular-nums;
+    }
+
     /* ── Chain card ── */
     .msg-chain-preview {
       max-width: 88%;
@@ -650,10 +671,10 @@
     </div>
     <div class="header-actions">
       {% if user_role == 'admin' %}
-      <a href="/admin/settings" class="btn-audit">Settings</a>
-      <a href="/admin/audit" class="btn-audit">Audit Log</a>
+      <a href="/admin/settings" class="btn-audit" target="_blank" rel="noopener">Settings</a>
+      <a href="/admin/audit" class="btn-audit" target="_blank" rel="noopener">Audit Log</a>
       {% endif %}
-      <form method="POST" action="/logout" style="margin:0;">
+      <form method="POST" action="/logout" style="margin:0;" onsubmit="sessionStorage.removeItem('optiflow_chat_history')">
         <button type="submit" class="btn-logout">Sign out</button>
       </form>
     </div>
@@ -705,6 +726,38 @@ function handleUnauthorized(res) {
   return false;
 }
 
+// ── Rate-limit countdown ─────────────────────────────────────────────────────
+
+let _rlTimer = null;
+let _rlEl    = null;
+
+function showRateLimitCountdown(seconds, onDone) {
+  _cancelRlCountdown();
+  _rlEl = document.createElement('div');
+  _rlEl.className = 'rl-notice';
+  _rlEl.innerHTML =
+    'Processing your request. Please wait\u2026' +
+    `<span class="rl-countdown" id="rl-count">${seconds}s</span>`;
+  chatArea.appendChild(_rlEl);
+  chatArea.scrollTop = chatArea.scrollHeight;
+
+  let remaining = seconds;
+  _rlTimer = setInterval(() => {
+    remaining--;
+    const el = document.getElementById('rl-count');
+    if (el) el.textContent = remaining + 's';
+    if (remaining <= 0) {
+      _cancelRlCountdown();
+      onDone();
+    }
+  }, 1000);
+}
+
+function _cancelRlCountdown() {
+  if (_rlTimer) { clearInterval(_rlTimer); _rlTimer = null; }
+  if (_rlEl)    { _rlEl.remove(); _rlEl = null; }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function escHtml(str) {
@@ -736,6 +789,26 @@ function hideLoading() {
   if (el) el.remove();
 }
 
+// ── Session storage for conversation history ────────────────────────────────
+const _STORAGE_KEY = 'optiflow_chat_history';
+
+function _saveMessage(text, type, meta) {
+  try {
+    const history = JSON.parse(sessionStorage.getItem(_STORAGE_KEY) || '[]');
+    history.push({ text, type, meta: meta || null });
+    // Keep last 200 messages to avoid hitting storage limits.
+    if (history.length > 200) history.splice(0, history.length - 200);
+    sessionStorage.setItem(_STORAGE_KEY, JSON.stringify(history));
+  } catch (_) { /* storage full or unavailable — silently ignore */ }
+}
+
+function _restoreHistory() {
+  try {
+    const history = JSON.parse(sessionStorage.getItem(_STORAGE_KEY) || '[]');
+    return history;
+  } catch (_) { return []; }
+}
+
 function addMessage(text, type, meta) {
   const msg = document.createElement('div');
   msg.className = 'msg msg-' + type;
@@ -755,6 +828,7 @@ function addMessage(text, type, meta) {
   }
   chatArea.appendChild(msg);
   chatArea.scrollTop = chatArea.scrollHeight;
+  _saveMessage(text, type, meta);
   return msg;
 }
 
@@ -906,6 +980,9 @@ async function approveQuery(cardId) {
   const pending = pendingQueries[cardId];
   if (!pending) return;
 
+  const isRlRetry = pending._rlRetry || false;
+  pending._rlRetry = false;
+
   setDisabled(true);
   const actionsEl = document.getElementById(cardId + '-actions');
   if (actionsEl) {
@@ -921,6 +998,45 @@ async function approveQuery(cardId) {
     });
     if (handleUnauthorized(res)) return;
     const data = await res.json();
+
+    if (data.rate_limited) {
+      if (isRlRetry) {
+        // Second attempt also rate limited — restore approve button with service-busy message.
+        if (actionsEl) {
+          actionsEl.innerHTML =
+            `<div style="color:#c92a2a;font-size:13px;margin-bottom:10px;">
+               Service busy. Your query is saved. Try again in a minute.
+             </div>
+             <button class="btn btn-secondary" onclick="approveQuery('${escHtml(cardId)}')">Try Again</button>
+             <button class="btn btn-secondary" onclick="rejectQuery('${escHtml(cardId)}')">Cancel</button>`;
+        }
+        setDisabled(false);
+      } else {
+        // First rate limit — show in-card countdown, then auto-retry.
+        pending._rlRetry = true;
+        const secs = data.retry_after || 60;
+        if (actionsEl) {
+          actionsEl.innerHTML =
+            `<div class="rl-notice" style="text-align:left;padding:10px 14px;">
+               Processing your request. Please wait\u2026
+               <span class="rl-countdown" id="${escHtml(cardId)}-rl-count">${secs}s</span>
+             </div>`;
+        }
+        let remaining = secs;
+        const iv = setInterval(() => {
+          remaining--;
+          const el = document.getElementById(cardId + '-rl-count');
+          if (el) el.textContent = remaining + 's';
+          if (remaining <= 0) {
+            clearInterval(iv);
+            approveQuery(cardId);
+          }
+        }, 1000);
+        setDisabled(false);
+      }
+      return;
+    }
+
     const card = document.getElementById(cardId);
     if (card) card.remove();
     const rowWord = data.rows_returned === 1 ? 'row' : 'rows';
@@ -940,6 +1056,9 @@ async function approveQuery(cardId) {
 async function approveChain(cardId) {
   const pending = pendingQueries[cardId];
   if (!pending) return;
+
+  const isRlRetry = pending._rlRetry || false;
+  pending._rlRetry = false;
 
   setDisabled(true);
 
@@ -979,6 +1098,44 @@ async function approveChain(cardId) {
     if (handleUnauthorized(res)) { clearInterval(progressInterval); return; }
     const data = await res.json();
     clearInterval(progressInterval);
+
+    if (data.rate_limited) {
+      if (isRlRetry) {
+        // Second attempt also rate limited — restore card with service-busy message.
+        if (actionsEl) {
+          actionsEl.innerHTML =
+            `<div style="color:#c92a2a;font-size:13px;margin-bottom:10px;">
+               Service busy. Your query is saved. Try again in a minute.
+             </div>
+             <button class="btn btn-secondary" onclick="approveChain('${escHtml(cardId)}')">Try Again</button>
+             <button class="btn btn-secondary" onclick="rejectQuery('${escHtml(cardId)}')">Cancel</button>`;
+        }
+        setDisabled(false);
+      } else {
+        // First rate limit — show in-card countdown, then auto-retry.
+        pending._rlRetry = true;
+        const secs = data.retry_after || 60;
+        if (actionsEl) {
+          actionsEl.innerHTML =
+            `<div class="rl-notice" style="text-align:left;padding:10px 14px;">
+               Processing your request. Please wait\u2026
+               <span class="rl-countdown" id="${escHtml(cardId)}-rl-count">${secs}s</span>
+             </div>`;
+        }
+        let remaining = secs;
+        const iv = setInterval(() => {
+          remaining--;
+          const el = document.getElementById(cardId + '-rl-count');
+          if (el) el.textContent = remaining + 's';
+          if (remaining <= 0) {
+            clearInterval(iv);
+            approveChain(cardId);
+          }
+        }, 1000);
+        setDisabled(false);
+      }
+      return;
+    }
 
     const card = document.getElementById(cardId);
     if (card) card.remove();
@@ -1033,14 +1190,16 @@ async function rejectQuery(cardId) {
 
 // ── Main send flow ──────────────────────────────────────────────────────────
 
-async function sendQuestion(question) {
+async function sendQuestion(question, _isRetry = false) {
   if (busy || !question.trim()) return;
 
   chipsDiv.style.display = 'none';
-  addMessage(question, 'user');
-  input.value = '';
+  if (!_isRetry) {
+    addMessage(question, 'user');
+    input.value = '';
+  }
   setDisabled(true);
-  showLoading();
+  if (!_isRetry) showLoading();
 
   try {
     const res  = await fetch('/ask', {
@@ -1048,9 +1207,24 @@ async function sendQuestion(question) {
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ question }),
     });
-    if (handleUnauthorized(res)) return;
+    if (handleUnauthorized(res)) { _cancelRlCountdown(); return; }
     const data = await res.json();
     hideLoading();
+
+    if (data.rate_limited) {
+      if (_isRetry) {
+        _cancelRlCountdown();
+        addMessage(
+          'Service busy. Your query is saved. Try again in a minute.',
+          'ai', '⏳ Rate limited'
+        );
+        setDisabled(false);
+        input.focus();
+      } else {
+        showRateLimitCountdown(data.retry_after || 60, () => sendQuestion(question, true));
+      }
+      return;
+    }
 
     if (data.mode === 'deep_dive') {
       if (!(data.steps || []).length) {
@@ -1095,6 +1269,7 @@ async function sendQuestion(question) {
 
   } catch (err) {
     hideLoading();
+    _cancelRlCountdown();
     addMessage('Something went wrong. Please try again.', 'ai');
     setDisabled(false);
   }
@@ -1106,9 +1281,38 @@ function sendFromInput() {
   sendQuestion(input.value);
 }
 
-// ── Welcome message ─────────────────────────────────────────────────────────
+// ── Welcome message (or history restore) ────────────────────────────────────
 
 (async function loadWelcome() {
+  // If there's a saved conversation in this browser session, restore it instead
+  // of fetching a new welcome message.
+  const history = _restoreHistory();
+  if (history.length > 0) {
+    // Restore without re-saving (avoid duplicate entries).
+    for (const entry of history) {
+      const msg = document.createElement('div');
+      msg.className = 'msg msg-' + entry.type;
+      const t = document.createElement('div');
+      t.className = 'msg-text';
+      if (entry.type === 'ai') {
+        t.innerHTML = marked.parse(entry.text || '');
+      } else {
+        t.textContent = entry.text;
+      }
+      msg.appendChild(t);
+      if (entry.meta) {
+        const m = document.createElement('div');
+        m.className = 'msg-meta';
+        m.textContent = entry.meta;
+        msg.appendChild(m);
+      }
+      chatArea.appendChild(msg);
+    }
+    chatArea.scrollTop = chatArea.scrollHeight;
+    input.focus();
+    return;
+  }
+
   showLoading();
   try {
     const res  = await fetch('/welcome');

@@ -96,6 +96,7 @@ You are an expert SQL analyst. Your ONLY job: generate a safe, read-only SQL que
 6. Use human-readable column aliases (e.g., AS "Customer Name", AS "Invoice Amount").
 7. Always include ORDER BY for meaningful sorting (e.g., by date DESC, amount DESC).
 8. For partial name matches use LIKE '%value%'.
+9. SQL SERVER STRICT GROUP BY RULE: Every column in SELECT and ORDER BY must either appear in GROUP BY or be inside an aggregate function (COUNT, SUM, AVG, MIN, MAX). SQL Server rejects non-grouped columns — it is stricter than MySQL/SQLite. If you need a column for context but it's not the grouping key, wrap it in MAX() or MIN(). BAD: SELECT Customer, Plant_Date, COUNT(*) FROM T GROUP BY Customer ORDER BY Plant_Date — GOOD: SELECT Customer, MAX(Plant_Date) AS LatestPlant, COUNT(*) AS Total FROM T GROUP BY Customer ORDER BY MAX(Plant_Date) DESC
 
 === OUTPUT FORMAT ===
 Respond with ONLY a valid JSON object — no markdown, no explanation outside the JSON, nothing else.
@@ -155,6 +156,7 @@ Use a single query for everything else.
 - TOP 100 unless question asks for all.
 - Use LEFT JOIN to lookup/master tables.
 - Human-readable column aliases. Always ORDER BY.
+- SQL SERVER STRICT GROUP BY RULE: Every column in SELECT and ORDER BY must either appear in GROUP BY or be inside an aggregate function (COUNT, SUM, AVG, MIN, MAX). Wrap non-grouped context columns in MAX() or MIN().
 
 === OUTPUT FORMAT ===
 Return ONLY valid JSON, no markdown.
@@ -213,6 +215,7 @@ Your job: generate a comprehensive multi-step SQL chain that gives a COMPLETE pi
 - No TOP limit on deep dives (user wants everything about this entity).
 - Use human-readable column aliases. Always ORDER BY.
 - Each step's SQL is standalone — does not reference prior step results.
+- SQL SERVER STRICT GROUP BY RULE: Every column in SELECT and ORDER BY must either appear in GROUP BY or be inside an aggregate function (COUNT, SUM, AVG, MIN, MAX). Wrap non-grouped context columns in MAX() or MIN().
 
 === OUTPUT FORMAT ===
 Return ONLY valid JSON, no markdown.
@@ -258,6 +261,7 @@ Your job: generate 3-5 SQL queries that together give a COMPLETE business health
 - TOP 50 per step is fine for health summary aggregates.
 - Use human-readable column aliases.
 - Use GROUP BY for counts/aggregations.
+- SQL SERVER STRICT GROUP BY RULE: Every column in SELECT and ORDER BY must either appear in GROUP BY or be inside an aggregate function (COUNT, SUM, AVG, MIN, MAX). Wrap non-grouped context columns in MAX() or MIN().
 
 === OUTPUT FORMAT ===
 Return ONLY valid JSON, no markdown.
@@ -274,6 +278,56 @@ Return ONLY valid JSON, no markdown.
   "warnings": []
 }}
 """
+
+
+_FIX_SQL_SYSTEM = """You are an expert SQL analyst. A SQL Server query failed with an error.
+Your ONLY job: return a corrected JSON object with the fixed SQL.
+
+SQL SERVER STRICT GROUP BY RULE: Every column in SELECT and ORDER BY must either appear in GROUP BY or be inside an aggregate function (COUNT, SUM, AVG, MIN, MAX). Wrap non-grouped context columns in MAX() or MIN().
+
+Return ONLY valid JSON (no markdown), same shape as the original:
+{"sql": "SELECT ...", "explanation": "Fixed by ...", "tables_used": [], "confidence": "high", "warnings": []}
+"""
+
+
+def fix_sql(question: str, failed_sql: str, error: str) -> dict:
+    """Ask the AI to fix a failed SQL query given the error message.
+
+    Returns same shape as generate_sql().
+    """
+    try:
+        schema = _load_schema()
+    except FileNotFoundError as e:
+        return _error_result(explanation=str(e))
+
+    knowledge = _load_company_knowledge()
+    company_section = _company_section(knowledge)
+    system = _FIX_SQL_SYSTEM + (f"\n\n=== DATABASE SCHEMA ===\n{schema}\n\n{company_section}" if company_section else f"\n\n=== DATABASE SCHEMA ===\n{schema}")
+
+    user_message = (
+        f"The user asked: {question}\n\n"
+        f"You generated this SQL:\n{failed_sql}\n\n"
+        f"SQL Server rejected it with this error:\n{error}\n\n"
+        "Fix the SQL and return the corrected JSON."
+    )
+
+    try:
+        text = _call_claude(system, user_message, max_tokens=1000)
+    except Exception as e:
+        logger.error(f"fix_sql AI call failed: {e}")
+        return _error_result(explanation=f"AI fix failed: {e}")
+
+    result = _parse_json_response(text)
+    if not result or not result.get("sql"):
+        return _error_result(explanation="AI could not produce a corrected SQL.")
+
+    return {
+        "sql":         result.get("sql"),
+        "explanation": result.get("explanation", ""),
+        "tables_used": result.get("tables_used", []),
+        "confidence":  result.get("confidence", "medium"),
+        "warnings":    result.get("warnings", []),
+    }
 
 
 def _call_claude(system_prompt: str, user_message: str, max_tokens: int = 2000) -> str:

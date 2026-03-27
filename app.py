@@ -34,7 +34,7 @@ from fastapi.templating import Jinja2Templates
 import core.auth as auth
 from config import settings
 from config.loader import load_model_config, load_ai_config, save_ai_config
-from config.ai_client import get_completion, test_connection as test_ai_connection
+from config.ai_client import get_completion, test_connection as test_ai_connection, RateLimitExhausted
 from core.setup_manager import (
     get_db_connection,
     is_setup_complete,
@@ -49,6 +49,7 @@ from core.agent_sql_generator import (
     generate_chain,
     generate_business_health_chain,
     generate_deep_dive_chain,
+    fix_sql,
     _load_company_knowledge,
 )
 import core.approved_queries as approved_queries
@@ -296,16 +297,31 @@ def _run_agent_approval(question: str, sql: str, tables_used: list) -> dict:
 
     logger.info(f"AGENT EXECUTING:\n{sql}")
 
-    try:
-        rows = execute_query(sql)
-    except Exception as e:
+    _SQL_MAX_RETRIES = 2
+    current_sql = sql
+    rows = None
+    for attempt in range(_SQL_MAX_RETRIES + 1):
+        try:
+            rows = execute_query(current_sql)
+            break
+        except Exception as exec_err:
+            error_str = str(exec_err)
+            logger.error(f"Agent execution error attempt {attempt + 1}: {error_str}")
+            if attempt < _SQL_MAX_RETRIES:
+                logger.info("Asking AI to fix SQL…")
+                fix = fix_sql(question, current_sql, error_str)
+                if fix.get("sql"):
+                    current_sql = fix["sql"]
+                    logger.info(f"Retrying with fixed SQL:\n{current_sql}")
+                else:
+                    elapsed = int((time.perf_counter() - t0) * 1000)
+                    return {"answer": f"Query execution failed and could not be fixed: {error_str}", "rows_returned": 0, "time_ms": elapsed}
+            else:
+                elapsed = int((time.perf_counter() - t0) * 1000)
+                return {"answer": f"Query execution failed after {_SQL_MAX_RETRIES} attempts: {error_str}", "rows_returned": 0, "time_ms": elapsed}
+    if rows is None:
         elapsed = int((time.perf_counter() - t0) * 1000)
-        logger.error(f"Agent execution error ({elapsed}ms): {e}")
-        return {
-            "answer": f"Query execution failed: {e}",
-            "rows_returned": 0,
-            "time_ms": elapsed,
-        }
+        return {"answer": "Query execution failed.", "rows_returned": 0, "time_ms": elapsed}
 
     total_rows = len(rows)
     logger.info(f"Agent query returned {total_rows} rows")
@@ -314,6 +330,8 @@ def _run_agent_approval(question: str, sql: str, tables_used: list) -> dict:
         answer = _interpret_results(question, rows, total_rows)
         if total_rows > 100:
             answer = f"Showing first 100 of {total_rows} results.\n\n{answer}"
+    except RateLimitExhausted:
+        raise  # bubble up to endpoint handler — frontend will show countdown + retry
     except Exception as e:
         logger.error(f"Interpretation failed: {e}")
         answer = f"{total_rows} row{'s' if total_rows != 1 else ''} returned."
@@ -401,29 +419,37 @@ def _run_chain_approval(
             continue
 
         logger.info(f"CHAIN step {step_num} EXECUTING:\n{sql}")
-        try:
-            rows = execute_query(sql)
-            logger.info(f"Chain step {step_num}: {len(rows)} rows")
-            total_rows += len(rows)
-            step_results.append({
-                "step": step_num,
-                "explanation": explanation,
-                "rows": rows,
-            })
-        except Exception as e:
-            logger.error(f"Chain step {step_num} failed: {e}")
-            step_results.append({
-                "step": step_num,
-                "explanation": explanation,
-                "rows": [],
-                "error": str(e),
-            })
+        _SQL_MAX_RETRIES = 2
+        current_sql = sql
+        step_rows = None
+        step_error = None
+        for attempt in range(_SQL_MAX_RETRIES + 1):
+            try:
+                step_rows = execute_query(current_sql)
+                break
+            except Exception as exec_err:
+                step_error = str(exec_err)
+                logger.error(f"Chain step {step_num} attempt {attempt + 1} failed: {step_error}")
+                if attempt < _SQL_MAX_RETRIES:
+                    fix = fix_sql(question, current_sql, step_error)
+                    if fix.get("sql"):
+                        current_sql = fix["sql"]
+                    else:
+                        break
+        if step_rows is not None:
+            logger.info(f"Chain step {step_num}: {len(step_rows)} rows")
+            total_rows += len(step_rows)
+            step_results.append({"step": step_num, "explanation": explanation, "rows": step_rows})
+        else:
+            step_results.append({"step": step_num, "explanation": explanation, "rows": [], "error": step_error})
 
     # Interpret combined results
     try:
         answer = _interpret_chain_results(
             question, step_results, summary_prompt, entity_label
         )
+    except RateLimitExhausted:
+        raise  # bubble up to endpoint handler — frontend will show countdown + retry
     except Exception as e:
         logger.error(f"Chain interpretation failed: {e}")
         answer = f"Ran {len(steps)} queries, {total_rows} total rows returned."
@@ -1067,6 +1093,9 @@ async def ask(request: Request):
             "intent": None,
             "time_ms": PIPELINE_TIMEOUT * 1000,
         }
+    except RateLimitExhausted as rl:
+        logger.warning(f"Rate limit during /ask — retry_after={rl.retry_after}s")
+        return JSONResponse({"rate_limited": True, "retry_after": rl.retry_after})
 
     _audit_ask(session["username"], question, result)
     return _safe_json(result)
@@ -1116,6 +1145,9 @@ async def approve(request: Request):
                 "total_rows": 0,
                 "time_ms": CHAIN_TIMEOUT * 1000,
             }
+        except RateLimitExhausted as rl:
+            logger.warning(f"Rate limit during chain approval — retry_after={rl.retry_after}s")
+            return JSONResponse({"rate_limited": True, "retry_after": rl.retry_after})
         audit_logger.log_action(session["username"], "query_chain", {
             "question":      question,
             "agent_type":    agent_type,
@@ -1151,6 +1183,9 @@ async def approve(request: Request):
             "rows_returned": 0,
             "time_ms": AGENT_TIMEOUT * 1000,
         }
+    except RateLimitExhausted as rl:
+        logger.warning(f"Rate limit during agent approval — retry_after={rl.retry_after}s")
+        return JSONResponse({"rate_limited": True, "retry_after": rl.retry_after})
 
     audit_logger.log_action(session["username"], "query_agent_approved", {
         "question":          question,

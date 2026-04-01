@@ -1,19 +1,56 @@
-# Secrets and credentials
+# =====================
+# Secrets & Credentials
+# =====================
 .env
 config/users.json
 config/.secret
 config/model_config.json
 config/db_config.json
 config/security.json
+config/business_context.json
 
-# Sensitive logs
+# =====================
+# Sensitive Logs & Data
+# =====================
 logs/audit.jsonl
 logs/audit.jsonl.*
 logs/approved_queries.jsonl
 
+# Generated at runtime — schema files contain potentially sensitive DB info
+prompts/schema_context.txt
+prompts/tables/
+
+# =====================
 # Python
+# =====================
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
 
-# OS
+# Test cache
+.pytest_cache/
+
+# =====================
+# OS & Editor
+# =====================
 .DS_Store
+.DS_Store?
+._*
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =====================
+# Claude / AI context
+# =====================
+.claude/

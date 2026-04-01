@@ -642,31 +642,72 @@
       <div class="panel hidden" id="panel-5">
         <div class="panel-title">Teach OptiFlow About Your Business</div>
         <div class="panel-subtitle">
-          Describe your business so OptiFlow writes better queries. This file (<code>config/company.md</code>)
-          is included in every AI prompt. You can edit it later at <strong>Settings → Company Knowledge</strong>.
-          <br><span style="color:#888;font-size:12px;">Optional — click Skip to continue without setting this up.</span>
+          OptiFlow analyzed your database and wrote this knowledge document. Review and correct anything that's wrong —
+          the more accurate this is, the better OptiFlow understands your business.
+          <br><span style="color:#aaa; font-size:12px;">You can edit this at any time in Settings → Company Knowledge.</span>
         </div>
 
-        <div class="status" id="teach-status"></div>
-
-        <div style="margin-bottom:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <button class="btn btn-secondary" id="btn-generate" onclick="generateKnowledge()">Generate Draft with AI</button>
-          <span style="font-size:12px; color:#888;">Uses your discovered schema to write an initial draft you can edit.</span>
+        <!-- Loading state -->
+        <div id="teach-loading" style="text-align:center; padding:52px 0; display:none;">
+          <div style="display:inline-block; width:38px; height:38px; border:3px solid #e0e0e0;
+               border-top-color:#1a1a2e; border-radius:50%; animation:spin 0.8s linear infinite;
+               margin-bottom:18px;"></div>
+          <div style="color:#444; font-size:14px; font-weight:500;">Analyzing your database schema…</div>
+          <div style="color:#aaa; font-size:12px; margin-top:6px;">This may take 15–30 seconds</div>
         </div>
 
-        <div class="form-group" style="margin-bottom:0;">
-          <label style="font-weight:600; margin-bottom:6px; display:block;">Company Knowledge (Markdown)</label>
-          <textarea id="inp-company-md" rows="14" style="
-            width:100%; padding:14px; font-family:'SFMono-Regular','Consolas',monospace;
-            font-size:12.5px; line-height:1.7; border:1px solid #d0d0d0;
-            border-radius:8px; resize:vertical; outline:none; color:#1a1a2e;
-          " placeholder="Describe your business, key tables, terminology, and any data quality rules…"></textarea>
+        <!-- Error (shown only if draft fails entirely) -->
+        <div id="teach-error" style="display:none; background:#ffe3e3; color:#c92a2a;
+             border:1px solid #ffb3b3; border-radius:8px; padding:12px 16px;
+             font-size:13px; margin-bottom:16px;"></div>
+
+        <!-- Editor + follow-up (shown after draft loads) -->
+        <div id="teach-editor-section" style="display:none;">
+
+          <!-- Edit / Preview tabs -->
+          <div style="display:flex; border-bottom:2px solid #e8e8e8;">
+            <button id="tab-edit" onclick="switchTeachTab('edit')" style="
+              padding:8px 20px; font-size:13px; font-weight:600; cursor:pointer;
+              border:none; background:none; color:#4c6ef5;
+              border-bottom:2px solid #4c6ef5; margin-bottom:-2px;">Edit</button>
+            <button id="tab-preview" onclick="switchTeachTab('preview')" style="
+              padding:8px 20px; font-size:13px; font-weight:600; cursor:pointer;
+              border:none; background:none; color:#aaa;
+              border-bottom:2px solid transparent; margin-bottom:-2px;">Preview</button>
+          </div>
+
+          <textarea id="inp-company-md" rows="22" style="
+            width:100%; padding:16px;
+            font-family:'SFMono-Regular','Consolas',monospace;
+            font-size:12.5px; line-height:1.75;
+            border:1px solid #d0d0d0; border-top:none; border-radius:0 0 8px 8px;
+            resize:vertical; outline:none; color:#1a1a2e; background:#fafeff;
+          " placeholder="Generating…"></textarea>
+
+          <div id="md-preview" style="
+            display:none; padding:20px 24px;
+            border:1px solid #d0d0d0; border-top:none; border-radius:0 0 8px 8px;
+            max-height:480px; overflow-y:auto;
+            font-size:13.5px; line-height:1.75; color:#1a1a2e;
+          "></div>
+
+          <!-- Follow-up questions (loaded after draft) -->
+          <div id="followup-section" style="display:none; margin-top:28px;">
+            <div style="font-size:14px; font-weight:700; color:#1a1a2e; margin-bottom:4px;">
+              A few questions to fill in the gaps
+            </div>
+            <div style="font-size:12.5px; color:#888; margin-bottom:18px;">
+              OptiFlow couldn't infer these from the schema alone. Your answers will be appended to the knowledge file.
+            </div>
+            <div id="followup-questions"></div>
+          </div>
+
         </div>
 
         <div class="btn-row">
           <button class="btn btn-secondary" onclick="goTo(4)">← Back</button>
-          <button class="btn btn-secondary" onclick="goTo(6)">Skip →</button>
-          <button class="btn btn-primary" onclick="saveCompanyKnowledge()">Save &amp; Continue →</button>
+          <button class="btn btn-secondary" id="btn-teach-skip" onclick="goTo(6)">Skip →</button>
+          <button class="btn btn-primary"   id="btn-teach-save" onclick="saveCompanyKnowledge()" style="display:none;">Save &amp; Continue →</button>
         </div>
       </div>
 
@@ -688,9 +729,10 @@
 
   <script>
 // ── State ──────────────────────────────────────────────────────────────────
-let connectionData = null;   // {server, database, user, password}
-let schemaData     = null;   // {db_name, server, tables: [...]}
-const TOTAL_STEPS  = 6;
+let connectionData  = null;   // {server, database, user, password}
+let schemaData      = null;   // {db_name, server, tables: [...]}
+let _draftGenerated = false;  // prevent double-generation if user navigates back/forward
+const TOTAL_STEPS   = 6;
 
 // ── Step navigation ────────────────────────────────────────────────────────
 function goTo(n) {
@@ -700,6 +742,7 @@ function goTo(n) {
     dot.classList.toggle('active', i === n);
     dot.classList.toggle('done',   i < n);
   }
+  if (n === 5 && !_draftGenerated) autoGenerateKnowledge();
   if (n === 6) buildDoneScreen();
   window.scrollTo(0, 0);
 }
@@ -1240,73 +1283,176 @@ async function saveAiConfig() {
   }
 }
 
-// ── Step 4: Company Knowledge ──────────────────────────────────────────────
-async function generateKnowledge() {
+// ── Step 5: Company Knowledge ──────────────────────────────────────────────
+
+function _showTeachError(msg) {
+  const el = document.getElementById('teach-error');
+  el.textContent = '✗ ' + msg;
+  el.style.display = 'block';
+}
+
+function switchTeachTab(tab) {
+  const textarea = document.getElementById('inp-company-md');
+  const preview  = document.getElementById('md-preview');
+  const tabEdit  = document.getElementById('tab-edit');
+  const tabPrev  = document.getElementById('tab-preview');
+
+  if (tab === 'preview') {
+    preview.innerHTML = _mdToHtml(textarea.value);
+    textarea.style.display = 'none';
+    preview.style.display  = 'block';
+    tabEdit.style.color = '#aaa'; tabEdit.style.borderBottomColor = 'transparent';
+    tabPrev.style.color = '#4c6ef5'; tabPrev.style.borderBottomColor = '#4c6ef5';
+  } else {
+    textarea.style.display = 'block';
+    preview.style.display  = 'none';
+    tabEdit.style.color = '#4c6ef5'; tabEdit.style.borderBottomColor = '#4c6ef5';
+    tabPrev.style.color = '#aaa'; tabPrev.style.borderBottomColor = 'transparent';
+  }
+}
+
+function _mdToHtml(text) {
+  let h = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  h = h.replace(/^### (.+)$/mg, '<h3 style="font-size:14px;font-weight:700;color:#1a1a2e;margin:18px 0 5px">$1</h3>');
+  h = h.replace(/^## (.+)$/mg,  '<h2 style="font-size:16px;font-weight:700;color:#1a1a2e;margin:24px 0 8px;padding-top:8px;border-top:1px solid #eee">$1</h2>');
+  h = h.replace(/^# (.+)$/mg,   '<h1 style="font-size:20px;font-weight:700;color:#1a1a2e;margin:0 0 18px">$1</h1>');
+  h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  h = h.replace(/`([^`]+)`/g, '<code style="background:#f0f0f0;padding:1px 5px;border-radius:3px;font-family:monospace;font-size:12px">$1</code>');
+  h = h.replace(/^- (.+)$/mg, '<li style="margin:3px 0 3px 20px;list-style:disc">$1</li>');
+  // Wrap consecutive <li> in <ul>
+  h = h.replace(/(<li[^>]*>.*?<\/li>\n?)+/gs, '<ul style="margin:6px 0">$&</ul>');
+  h = h.replace(/\n\n+/g, '</p><p style="margin:6px 0">');
+  h = h.replace(/\n/g, '<br>');
+  return '<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif"><p style="margin:6px 0">' + h + '</p></div>';
+}
+
+function _renderFollowup(questions) {
+  if (!questions || questions.length === 0) return;
+  const section = document.getElementById('followup-section');
+  const container = document.getElementById('followup-questions');
+  container.innerHTML = '';
+
+  questions.forEach(q => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'margin-bottom:18px;';
+    wrap.innerHTML = `
+      <label style="display:block;font-size:13px;font-weight:500;color:#333;margin-bottom:6px;">${escHtml(q.question)}</label>
+      <textarea
+        class="followup-answer"
+        data-question="${escHtml(q.question)}"
+        rows="2"
+        placeholder="${escHtml(q.placeholder || '')}"
+        style="width:100%;padding:10px 12px;border:1px solid #d0d0d0;border-radius:8px;
+               font-size:13px;line-height:1.5;outline:none;resize:vertical;
+               font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#1a1a2e;"
+      ></textarea>`;
+    container.appendChild(wrap);
+  });
+  section.style.display = 'block';
+}
+
+async function autoGenerateKnowledge() {
   if (!schemaData) {
-    setStatus('teach-status', 'error', 'Complete schema discovery first (Step 3).');
+    // No schema yet — show editor empty so user can skip
+    document.getElementById('teach-editor-section').style.display = 'block';
+    document.getElementById('btn-teach-save').style.display = 'inline-block';
+    _draftGenerated = true;
     return;
   }
-  clearStatus('teach-status');
-  const btn = document.getElementById('btn-generate');
-  btn.disabled = true;
-  btn.textContent = 'Generating…';
-  setStatus('teach-status', 'info', 'Generating company knowledge draft from your schema…');
 
-  // Build a simple schema summary for the prompt
-  const schemaSummary = schemaData.tables.map(t => {
-    const cols = t.columns.slice(0, 8).map(c => c.name).join(', ');
-    return `- ${t.name} (${t.row_count.toLocaleString()} rows): ${cols}${t.columns.length > 8 ? '…' : ''}`;
-  }).join('\n');
+  _draftGenerated = true;
+  document.getElementById('teach-loading').style.display = 'block';
+  document.getElementById('teach-editor-section').style.display = 'none';
+  document.getElementById('teach-error').style.display = 'none';
 
+  // Step 1: generate draft
+  let draft = '';
   try {
     const res  = await fetch('/setup/generate-company-draft', {
       method:  'POST',
       headers: {'Content-Type': 'application/json'},
-      body:    JSON.stringify({
-        db_name: schemaData.db_name,
-        schema_summary: schemaSummary,
-      }),
+      body:    JSON.stringify({ db_name: schemaData.db_name }),
     });
     const data = await res.json();
     if (data.success) {
-      document.getElementById('inp-company-md').value = data.content;
-      clearStatus('teach-status');
+      draft = data.content;
+    } else if (data.retry_after) {
+      // Rate limited — wait and retry once
+      await new Promise(r => setTimeout(r, (data.retry_after + 2) * 1000));
+      const res2  = await fetch('/setup/generate-company-draft', {
+        method:  'POST',
+        headers: {'Content-Type': 'application/json'},
+        body:    JSON.stringify({ db_name: schemaData.db_name }),
+      });
+      const data2 = await res2.json();
+      if (data2.success) draft = data2.content;
+      else throw new Error(data2.error || 'Generation failed after rate limit retry.');
     } else {
-      setStatus('teach-status', 'error', '✗ ' + (data.error || 'Generation failed.'));
+      throw new Error(data.error || 'Generation failed.');
     }
   } catch (err) {
-    setStatus('teach-status', 'error', '✗ Network error: ' + err.message);
+    document.getElementById('teach-loading').style.display = 'none';
+    _showTeachError('Draft generation failed: ' + err.message + ' — you can type your knowledge manually below.');
+    document.getElementById('inp-company-md').value = '';
+    document.getElementById('teach-editor-section').style.display = 'block';
+    document.getElementById('btn-teach-save').style.display = 'inline-block';
+    return;
   }
 
-  btn.disabled = false;
-  btn.textContent = 'Generate Draft with AI';
+  document.getElementById('inp-company-md').value = draft;
+  document.getElementById('teach-loading').style.display = 'none';
+  document.getElementById('teach-editor-section').style.display = 'block';
+  document.getElementById('btn-teach-save').style.display = 'inline-block';
+
+  // Step 2: generate follow-up questions (non-blocking, best-effort)
+  try {
+    const res  = await fetch('/setup/company-followup', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({ draft }),
+    });
+    const data = await res.json();
+    if (data.success && data.questions && data.questions.length > 0) {
+      _renderFollowup(data.questions);
+    }
+  } catch (_) { /* follow-up is optional — ignore errors */ }
 }
 
 async function saveCompanyKnowledge() {
   const content = document.getElementById('inp-company-md').value.trim();
-  if (!content) {
-    // Nothing to save — just proceed
-    goTo(6);
-    return;
-  }
-  clearStatus('teach-status');
-  setStatus('teach-status', 'info', 'Saving…');
+  if (!content) { goTo(6); return; }
+
+  // Collect follow-up answers
+  const followup_answers = [];
+  document.querySelectorAll('.followup-answer').forEach(el => {
+    const answer = el.value.trim();
+    if (answer) {
+      followup_answers.push({ question: el.getAttribute('data-question'), answer });
+    }
+  });
+
+  const btn = document.getElementById('btn-teach-save');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
   try {
     const res  = await fetch('/setup/save-company-knowledge', {
       method:  'POST',
       headers: {'Content-Type': 'application/json'},
-      body:    JSON.stringify({ content }),
+      body:    JSON.stringify({ content, followup_answers }),
     });
     const data = await res.json();
     if (data.success) {
-      clearStatus('teach-status');
       goTo(6);
     } else {
-      setStatus('teach-status', 'error', '✗ ' + data.error);
+      _showTeachError(data.error || 'Save failed.');
     }
   } catch (err) {
-    setStatus('teach-status', 'error', '✗ ' + err.message);
+    _showTeachError('Network error: ' + err.message);
   }
+
+  btn.disabled = false;
+  btn.textContent = 'Save & Continue →';
 }
 
 // ── On load: skip Step 1 if admin already exists ───────────────────────────

@@ -309,7 +309,7 @@ def _run_agent_approval(question: str, sql: str, tables_used: list) -> dict:
             logger.error(f"Agent execution error attempt {attempt + 1}: {error_str}")
             if attempt < _SQL_MAX_RETRIES:
                 logger.info("Asking AI to fix SQL…")
-                fix = fix_sql(question, current_sql, error_str)
+                fix = fix_sql(question, current_sql, error_str, tables_used=tables_used)
                 if fix.get("sql"):
                     current_sql = fix["sql"]
                     logger.info(f"Retrying with fixed SQL:\n{current_sql}")
@@ -431,7 +431,7 @@ def _run_chain_approval(
                 step_error = str(exec_err)
                 logger.error(f"Chain step {step_num} attempt {attempt + 1} failed: {step_error}")
                 if attempt < _SQL_MAX_RETRIES:
-                    fix = fix_sql(question, current_sql, step_error)
+                    fix = fix_sql(question, current_sql, step_error, tables_used=tables)
                     if fix.get("sql"):
                         current_sql = fix["sql"]
                     else:
@@ -974,58 +974,165 @@ async def setup_save_context(request: Request):
         return _safe_json({"success": False, "error": str(e)})
 
 
-_COMPANY_MD_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "company.md")
+_COMPANY_MD_PATH   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "company.md")
+_SCHEMA_CONTEXT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "schema_context.txt")
+
+_COMPANY_DRAFT_SYSTEM = """You are analyzing a database schema for a business. Based on the table names, column names, data types, row counts, and enum values, write a comprehensive company knowledge document.
+
+For each table, explain:
+- What business process this table tracks (infer from column names)
+- What each status/type value likely means
+- How this table relates to other tables (follow foreign key patterns in column names)
+- What key business questions this table can answer
+- Any data quality concerns (NULL-heavy columns, suspicious values, test data patterns)
+
+Also infer:
+- What industry this company is in
+- What the core business workflow is (e.g. Lead → Quote → Order → Invoice → Payment)
+- What the key business metrics would be
+
+Write in this exact markdown structure:
+
+# Company: [Inferred company name, or "Unknown — please update"]
+
+## Industry & Business Model
+[2-3 sentences about what the company does, based on the schema]
+
+## Core Business Workflow
+[The main process flow using → arrows, e.g. Lead → Quote → PO → Invoice → Payment]
+
+## Table Guide
+
+For EACH table, write:
+
+### [TableName] ([row_count] rows)
+**Purpose:** [What this table tracks]
+**Key columns:** [Most important 5-6 columns with their likely meanings]
+**Status values:** [If status/type columns exist, list each value and its likely business meaning — mark uncertain with [GUESS]]
+**Relationships:** [Which other tables this connects to, based on shared column name patterns]
+**Use when asked about:** [CRITICAL — list specific business questions and phrases a user might type. Be detailed. Example: "project pipeline, active projects, projects by status, overdue projects, project count by customer, which projects are stuck"]
+**Data quality notes:** [Any concerns — high NULL rate, columns always empty, suspicious patterns]
+
+## Key Business Metrics
+- [Metric name]: [How to calculate it and which table(s) to use]
+
+## Business Terminology
+- [Term from column or table name]: [What it likely means in this business context]
+
+## Known Data Issues
+- [Any patterns suggesting data quality issues]
+
+## Fiscal Calendar
+Fiscal year: [Infer from date column patterns, or "Please fill in — calendar year assumed"]
+
+Be specific. Use actual column and table names. Mark uncertain inferences with [GUESS].
+Write in plain English. This document is read by business users, not developers."""
+
+
+_COMPANY_FOLLOWUP_SYSTEM = """You generated a company knowledge document from a database schema. Now generate 3-5 targeted follow-up questions to fill in gaps that cannot be inferred from the schema alone.
+
+Consider asking about:
+- Status column values you guessed at — are the guesses correct?
+- If multiple tables have amount/revenue columns — which is the primary revenue metric?
+- Fiscal year if date columns were found
+- What the company calls its customers (clients, accounts, partners?)
+- Any columns that were mostly NULL — is that expected?
+
+Rules:
+- Reference actual table and column names
+- Keep each question under 2 sentences
+- Make placeholder text show a concrete example answer
+- Generate 3-5 questions maximum
+
+Return ONLY a valid JSON array:
+[
+  {"id": "q1", "question": "...", "placeholder": "e.g. ..."},
+  {"id": "q2", "question": "...", "placeholder": "e.g. ..."}
+]"""
 
 
 @app.post("/setup/generate-company-draft")
 async def setup_generate_company_draft(request: Request):
-    """Use Claude to generate an initial company.md draft from the discovered schema."""
+    """Generate a rich company.md draft by sending full schema_context.txt to the AI."""
     if (err := _setup_auth_check(request)):
         return err
-    body           = await request.json()
-    db_name        = body.get("db_name", "the database")
-    schema_summary = body.get("schema_summary", "").strip()
+    body    = await request.json()
+    db_name = body.get("db_name", "the database")
 
-    if not schema_summary:
-        return _safe_json({"success": False, "error": "No schema summary provided."})
+    if not os.path.exists(_SCHEMA_CONTEXT_PATH):
+        return _safe_json({"success": False, "error": "Schema not discovered yet — complete Step 4 first."})
+
+    try:
+        with open(_SCHEMA_CONTEXT_PATH, encoding="utf-8") as f:
+            schema_content = f.read()
+    except Exception as e:
+        return _safe_json({"success": False, "error": f"Could not read schema: {e}"})
 
     try:
         content = get_completion(
-            system=(
-                "You are helping set up a business intelligence tool. "
-                "Generate a company.md knowledge file in markdown format. "
-                "Based on the database schema provided, write helpful sections that explain: "
-                "1. A brief business overview (what kind of business this likely is), "
-                "2. Key tables and what they mean, "
-                "3. Important terminology (based on column/table names), "
-                "4. Data quality notes (placeholder for the user to fill in). "
-                "Keep it practical and concise. Use ## headings. "
-                "Be honest about what you're inferring vs. what's certain — "
-                "tell the user to update any guesses. "
-                "Do NOT add a title line (the user will see the filename). "
-                "Write in plain English, not technical jargon."
-            ),
-            user=(
-                f"Database name: {db_name}\n\n"
-                f"Tables discovered:\n{schema_summary}\n\n"
-                "Generate the company knowledge file."
-            ),
-            max_tokens=1200,
+            system=_COMPANY_DRAFT_SYSTEM,
+            user=f"Database name: {db_name}\n\n{schema_content}",
+            max_tokens=4000,
             temperature=0,
         )
         return _safe_json({"success": True, "content": content})
+    except RateLimitExhausted as rl:
+        return _safe_json({"success": False, "error": "Rate limited", "retry_after": rl.retry_after})
     except Exception as e:
         logger.error(f"generate-company-draft error: {e}")
         return _safe_json({"success": False, "error": str(e)})
 
 
-@app.post("/setup/save-company-knowledge")
-async def setup_save_company_knowledge(request: Request):
-    """Save company knowledge markdown to config/company.md."""
+@app.post("/setup/company-followup")
+async def setup_company_followup(request: Request):
+    """Generate targeted follow-up questions from the AI-generated company.md draft."""
     if (err := _setup_auth_check(request)):
         return err
-    body = await request.json()
+    body  = await request.json()
+    draft = body.get("draft", "").strip()
+
+    if not draft:
+        return _safe_json({"success": True, "questions": []})
+
+    try:
+        text = get_completion(
+            system=_COMPANY_FOLLOWUP_SYSTEM,
+            user=f"Here is the company knowledge document I generated:\n\n{draft[:3000]}\n\nGenerate follow-up questions.",
+            max_tokens=600,
+            temperature=0,
+        )
+        import re as _re
+        fence = _re.search(r"```(?:json)?\s*(.*?)\s*```", text, _re.DOTALL)
+        if fence:
+            text = fence.group(1)
+        questions = json.loads(text)
+        if not isinstance(questions, list):
+            questions = []
+        return _safe_json({"success": True, "questions": questions[:5]})
+    except Exception as e:
+        logger.warning(f"company-followup non-fatal: {e}")
+        return _safe_json({"success": True, "questions": []})
+
+
+@app.post("/setup/save-company-knowledge")
+async def setup_save_company_knowledge(request: Request):
+    """Save company knowledge markdown to config/company.md.
+
+    Accepts optional followup_answers list [{question, answer}] to append.
+    """
+    if (err := _setup_auth_check(request)):
+        return err
+    body    = await request.json()
     content = body.get("content", "").strip()
+    answers = body.get("followup_answers", [])
+
+    # Append any non-empty follow-up answers
+    filled = [a for a in answers if isinstance(a, dict) and a.get("answer", "").strip()]
+    if filled:
+        content += "\n\n## Additional Context\n"
+        for a in filled:
+            content += f"\n**{a['question']}**\n{a['answer']}\n"
+
     try:
         os.makedirs(os.path.dirname(_COMPANY_MD_PATH), exist_ok=True)
         with open(_COMPANY_MD_PATH, "w", encoding="utf-8") as f:

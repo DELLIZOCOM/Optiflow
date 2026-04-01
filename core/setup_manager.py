@@ -9,10 +9,159 @@ Used by:
 import json
 import logging
 import os
+import re
 
 logger = logging.getLogger(__name__)
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+# ── Split-schema helpers ───────────────────────────────────────────────────────
+# These generate schema_index.txt (one line/table) and per-table detail files
+# used by the two-step SQL generation in agent_sql_generator.py.
+
+_TABLE_NAME_OVERRIDES: dict = {
+    # Add project-specific human descriptions here, keyed by exact table name.
+    # Example: "ProSt": "Project pipeline and status tracking",
+}
+
+_DESCRIPTION_PATTERNS: list = [
+    # (compiled_pattern, description) — matched against table name, case-insensitive.
+    (re.compile(r"project",              re.I), "Project records and tracking"),
+    (re.compile(r"customer|client",      re.I), "Customer and client data"),
+    (re.compile(r"order|invoice",        re.I), "Order and invoice records"),
+    (re.compile(r"product|item|sku",     re.I), "Product and item catalogue"),
+    (re.compile(r"employee|staff",       re.I), "Employee and staff records"),
+    (re.compile(r"sales|revenue",        re.I), "Sales and revenue data"),
+    (re.compile(r"target|budget|forecast", re.I), "Target, budget, and forecast data"),
+    (re.compile(r"master",               re.I), "Master reference data"),
+    (re.compile(r"lookup|ref(?:erence)?",re.I), "Reference and lookup table"),
+    (re.compile(r"log|audit|history|event", re.I), "Log and audit records"),
+    (re.compile(r"report|summary",       re.I), "Report and summary data"),
+    (re.compile(r"payment|finance|account", re.I), "Financial and payment records"),
+    (re.compile(r"status|state|stage",   re.I), "Status and stage tracking"),
+    (re.compile(r"categor|type|class",   re.I), "Category and classification data"),
+    (re.compile(r"contact|address|location", re.I), "Contact and address information"),
+    (re.compile(r"notif|alert",          re.I), "Notifications and alerts"),
+    (re.compile(r"user|admin|role|permission", re.I), "User and access management"),
+]
+
+_KEY_COL_SKIP_TYPES: frozenset = frozenset({
+    "image", "varbinary", "binary", "text", "ntext", "xml",
+    "geography", "geometry",
+})
+
+_KEY_COL_SKIP_WORDS: tuple = (
+    "attach", "file", "photo", "image", "blob", "thumb", "icon", "logo",
+    "content", "body", "remark", "comment",
+)
+
+# Keyword → score for key column selection (higher = more important to show in index)
+_KEY_COL_SCORE: dict = {
+    "id": 5, "code": 5, "no": 5, "num": 5, "number": 5,
+    "name": 4, "title": 4,
+    "status": 3, "type": 3, "stage": 3, "state": 3,
+    "date": 3, "time": 3, "year": 2, "month": 2,
+    "amount": 3, "total": 3, "value": 3, "price": 3, "qty": 2, "count": 2,
+    "customer": 3, "client": 3, "project": 3, "item": 2, "product": 2,
+    "user": 2, "owner": 2, "manager": 2, "pic": 2,
+}
+
+
+def _derive_table_description(table_name: str, columns: list) -> str:
+    """Return a human-readable one-line description for a table without AI."""
+    if table_name in _TABLE_NAME_OVERRIDES:
+        return _TABLE_NAME_OVERRIDES[table_name]
+
+    for pattern, description in _DESCRIPTION_PATTERNS:
+        if pattern.search(table_name):
+            return description
+
+    # Column-signature fallback
+    col_names_lower = [c["name"].lower() for c in columns]
+    if any("project" in n or "proj" in n for n in col_names_lower):
+        return "Project-related records"
+    if any("customer" in n or "client" in n for n in col_names_lower):
+        return "Customer-related records"
+    if any("invoice" in n or "order" in n for n in col_names_lower):
+        return "Order or invoice records"
+    if any("employee" in n or "staff" in n for n in col_names_lower):
+        return "Employee or staff records"
+
+    return "Business data table"
+
+
+def _score_key_column(col_name: str, col_type: str) -> int:
+    """Score how important a column is for the schema index. -1 means skip."""
+    base_type = col_type.split("(")[0].lower()
+    if base_type in _KEY_COL_SKIP_TYPES:
+        return -1
+
+    col_lower = col_name.lower()
+    if any(skip in col_lower for skip in _KEY_COL_SKIP_WORDS):
+        return -1
+
+    score = 0
+    parts = re.split(r"[_\s]", col_lower)
+    for part in parts:
+        score += _KEY_COL_SCORE.get(part, 0)
+
+    # Also check for keywords embedded in compound names (e.g. "ProjectCode")
+    for keyword, pts in _KEY_COL_SCORE.items():
+        if pts >= 3 and keyword in col_lower:
+            score = max(score, pts)
+
+    return score
+
+
+def _select_key_columns(columns: list, max_cols: int = 5) -> list:
+    """Return up to max_cols column names that best represent the table."""
+    scored = [(s, col["name"]) for col in columns
+              if (s := _score_key_column(col["name"], col["type"])) >= 0]
+    scored.sort(key=lambda x: -x[0])
+    result = [name for score, name in scored if score > 0][:max_cols]
+    if not result and scored:
+        result = [scored[0][1]]
+    return result
+
+
+def _write_schema_index(tables_data: list) -> None:
+    """Write prompts/schema_index.txt — one line per table."""
+    index_path = os.path.join(_ROOT, "prompts", "schema_index.txt")
+    lines = []
+    for t in tables_data:
+        desc = _derive_table_description(t["name"], t["columns"])
+        key_cols = _select_key_columns(t["columns"])
+        key_str = ", ".join(key_cols) if key_cols else "—"
+        lines.append(f"{t['name']} | {t['row_count']:,} rows | {desc} | Key columns: {key_str}")
+    with open(index_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    logger.info(f"Schema index written: {len(lines)} tables → prompts/schema_index.txt")
+
+
+def _write_table_file(table: dict) -> None:
+    """Write a per-table detail file to prompts/tables/{TableName}.txt."""
+    tables_dir = os.path.join(_ROOT, "prompts", "tables")
+    os.makedirs(tables_dir, exist_ok=True)
+
+    safe_name = re.sub(r"[^\w\-]", "_", table["name"])
+    path = os.path.join(tables_dir, f"{safe_name}.txt")
+
+    lines = [
+        f"TABLE: {table['name']}",
+        f"Row count: {table['row_count']:,}",
+        f"Columns ({len(table['columns'])}):",
+    ]
+    for col in table["columns"]:
+        null_str = "NULL" if col["nullable"] else "NOT NULL"
+        lines.append(f"  {col['name']:<35} {col['type']:<25} {null_str}")
+    if table.get("categorical"):
+        lines.append("Distinct values for key columns:")
+        for col_name, vals in table["categorical"].items():
+            lines.append(f"  {col_name}: {vals}")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
 
 
 # ── Status check ─────────────────────────────────────────────────────────────
@@ -271,6 +420,15 @@ def run_schema_discovery(conn, db_name: str, server: str) -> dict:
         f.write("\n".join(file_lines))
 
     logger.info(f"Schema discovery complete: {len(table_names)} tables → prompts/schema_context.txt")
+
+    # Write split-schema files for two-step SQL generation
+    try:
+        _write_schema_index(tables_data)
+        for t in tables_data:
+            _write_table_file(t)
+        logger.info(f"Per-table files written: {len(tables_data)} → prompts/tables/")
+    except Exception as exc:
+        logger.warning(f"Split schema generation failed (non-fatal): {exc}")
 
     return {
         "db_name": db_name,

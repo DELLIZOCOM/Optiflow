@@ -29,11 +29,31 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Path to the schema context file (populated by setup schema discovery)
 _SCHEMA_PATH = os.path.join(_ROOT, "prompts", "schema_context.txt")
 
+# Paths for split-schema two-step generation
+_SCHEMA_INDEX_PATH = os.path.join(_ROOT, "prompts", "schema_index.txt")
+_TABLES_DIR        = os.path.join(_ROOT, "prompts", "tables")
+
 # Path to company knowledge file (populated by setup wizard Step 4)
 _COMPANY_MD_PATH = os.path.join(_ROOT, "config", "company.md")
 
 # Regex to strip ```json ... ``` wrappers Claude sometimes adds.
 _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?\s*```$", re.DOTALL)
+
+# Only use two-step generation when the schema has more than this many tables.
+# Smaller databases fit comfortably in one call.
+_MIN_TABLES_FOR_TWO_STEP = 15
+
+# System prompt for Step 1 (cheap table-selection call)
+_TABLE_SELECT_SYSTEM = """You are a database expert. Your only job: select which tables are needed to answer the question or task.
+
+Return ONLY a JSON array of table names. No explanation, no markdown.
+Example: ["TableA", "TableB"]
+
+Rules:
+- Return 1-5 table names maximum
+- Include only tables directly needed
+- If nothing clearly matches, return the 3 most likely tables
+"""
 
 
 def _load_schema() -> str:
@@ -68,6 +88,161 @@ def _company_section(knowledge: str) -> str:
     if not knowledge:
         return ""
     return f"=== COMPANY KNOWLEDGE (use this to write better queries) ===\n{knowledge}"
+
+
+def _load_schema_index() -> str | None:
+    """Load schema_index.txt (one line per table). Returns None if not present."""
+    if not os.path.exists(_SCHEMA_INDEX_PATH):
+        return None
+    try:
+        with open(_SCHEMA_INDEX_PATH, encoding="utf-8") as f:
+            return f.read()
+    except Exception:
+        return None
+
+
+def _load_table_schemas(table_names: list) -> str:
+    """Load per-table detail files for the given table names and concatenate them."""
+    if not os.path.exists(_TABLES_DIR):
+        return ""
+
+    # Build case-insensitive filename lookup once
+    available: dict = {}
+    try:
+        for fname in os.listdir(_TABLES_DIR):
+            if fname.endswith(".txt"):
+                available[fname[:-4].lower()] = os.path.join(_TABLES_DIR, fname)
+    except Exception:
+        return ""
+
+    parts = []
+    for name in table_names:
+        safe = re.sub(r"[^\w\-]", "_", name)
+        path = available.get(safe.lower()) or available.get(name.lower())
+        if path:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    parts.append(f.read())
+            except Exception:
+                pass
+
+    return "\n\n".join(parts)
+
+
+def _extract_use_when_sections(company_md: str) -> str:
+    """Extract 'Use when asked about' lines from company.md for table selection context.
+
+    Returns a compact multi-line string like:
+        TableName: project pipeline, active projects, ...
+        OtherTable: invoices, billing, pending payments, ...
+    """
+    if not company_md:
+        return ""
+    lines = []
+    current_table = None
+    for line in company_md.splitlines():
+        # ### TableName (N rows) heading
+        if line.startswith("### "):
+            current_table = line[4:].split("(")[0].strip()
+        elif current_table and line.strip().lower().startswith("**use when asked about:**"):
+            phrase = line.split(":**", 1)[-1].strip().lstrip("*").strip()
+            if phrase:
+                lines.append(f"{current_table}: {phrase}")
+    return "\n".join(lines)
+
+
+def _select_tables_for_question(
+    question: str,
+    schema_index: str,
+    purpose: str = "query",
+    company_hints: str = "",
+) -> list:
+    """Step 1: Ask AI to pick relevant tables from schema_index (cheap call).
+
+    Args:
+        question:      The user's question or entity label.
+        schema_index:  Content of schema_index.txt.
+        purpose:       "query", "health", or "entity".
+        company_hints: Extracted "Use when asked about" lines from company.md —
+                       provides richer matching context without sending the full file.
+
+    Returns list of table names; empty list on failure.
+    """
+    hints_section = (
+        f"\n\nBusiness context (use when asked about):\n{company_hints}"
+        if company_hints else ""
+    )
+
+    if purpose == "health":
+        user_msg = (
+            "Select the most important tables for a business health summary "
+            "(metrics, pipeline, financials, operations).\n\n"
+            f"Available tables:\n{schema_index}{hints_section}"
+        )
+    elif purpose == "entity":
+        user_msg = (
+            f"Select tables that would contain records related to entity: {question}\n\n"
+            f"Available tables:\n{schema_index}{hints_section}"
+        )
+    else:
+        user_msg = (
+            f"Question: {question}\n\n"
+            f"Available tables:\n{schema_index}{hints_section}\n\n"
+            "Which tables are needed to answer this question?"
+        )
+
+    try:
+        text = _call_claude(_TABLE_SELECT_SYSTEM, user_msg, max_tokens=300)
+        fence_match = _CODE_FENCE_RE.match(text)
+        if fence_match:
+            text = fence_match.group(1).strip()
+        result = json.loads(text)
+        if isinstance(result, list):
+            return [str(t) for t in result]
+    except Exception as exc:
+        logger.warning(f"Table selection failed ({purpose}): {exc}")
+
+    return []
+
+
+def _resolve_schema(question: str, purpose: str = "query", cached_tables: list | None = None) -> tuple:
+    """Resolve the schema text and selected tables for SQL generation.
+
+    Two-step path (schema_index.txt exists and table count > threshold):
+        Step 1 — cheap call selects relevant table names, enriched by company.md hints
+        Step 2 — load only those table detail files
+        Returns (detail_schema, [table_names])
+
+    Fallback path (split files absent or selection empty):
+        Returns (full_schema_context.txt, None)
+
+    Raises FileNotFoundError if schema context is also missing.
+    """
+    index = _load_schema_index()
+
+    if index is None:
+        return _load_schema(), None
+
+    table_count = sum(1 for line in index.splitlines() if line.strip())
+    if table_count <= _MIN_TABLES_FOR_TWO_STEP:
+        # Small DB — full schema comfortably fits; skip two-step overhead
+        return _load_schema(), None
+
+    if cached_tables:
+        tables = cached_tables
+    else:
+        # Extract "Use when asked about" hints from company.md for richer selection
+        company_hints = _extract_use_when_sections(_load_company_knowledge())
+        tables = _select_tables_for_question(question, index, purpose, company_hints)
+
+    if not tables:
+        return _load_schema(), None
+
+    schema_text = _load_table_schemas(tables)
+    if not schema_text:
+        return _load_schema(), None
+
+    return schema_text, tables
 
 
 def _build_system_prompt(schema: str, knowledge: str = "") -> str:
@@ -290,13 +465,17 @@ Return ONLY valid JSON (no markdown), same shape as the original:
 """
 
 
-def fix_sql(question: str, failed_sql: str, error: str) -> dict:
+def fix_sql(question: str, failed_sql: str, error: str, tables_used: list | None = None) -> dict:
     """Ask the AI to fix a failed SQL query given the error message.
 
+    If tables_used is provided, loads only those table detail files (faster).
     Returns same shape as generate_sql().
     """
     try:
-        schema = _load_schema()
+        if tables_used:
+            schema = _load_table_schemas(tables_used) or _load_schema()
+        else:
+            schema, _ = _resolve_schema(question, purpose="query")
     except FileNotFoundError as e:
         return _error_result(explanation=str(e))
 
@@ -375,7 +554,7 @@ def generate_sql(question: str) -> dict:
         return _error_result(explanation="Empty question provided.")
 
     try:
-        schema = _load_schema()
+        schema, _ = _resolve_schema(question, purpose="query")
     except FileNotFoundError as e:
         logger.error(str(e))
         return _error_result(explanation=str(e), warnings=["Schema context file is missing."])
@@ -415,7 +594,7 @@ def generate_chain(question: str) -> dict:
         return {**_error_result(explanation="Empty question provided."), "mode": "single"}
 
     try:
-        schema = _load_schema()
+        schema, _ = _resolve_schema(question, purpose="query")
     except FileNotFoundError as e:
         logger.error(str(e))
         return {**_error_result(explanation=str(e), warnings=["Schema context file is missing."]), "mode": "single"}
@@ -475,7 +654,7 @@ def generate_business_health_chain(question: str = "") -> dict:
     user_message = question or "Give me a comprehensive business health summary."
 
     try:
-        schema = _load_schema()
+        schema, _ = _resolve_schema(user_message, purpose="health")
     except FileNotFoundError as e:
         logger.error(str(e))
         return {**_error_result(explanation=str(e), warnings=["Schema context file is missing."]), "mode": "chain", "steps": [], "summary_prompt": ""}
@@ -537,7 +716,7 @@ def generate_deep_dive_chain(entity_label: str, question: str = "") -> dict:
         }
 
     try:
-        schema = _load_schema()
+        schema, _ = _resolve_schema(entity_label, purpose="entity")
     except FileNotFoundError as e:
         logger.error(str(e))
         return {

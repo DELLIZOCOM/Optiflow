@@ -1,8 +1,8 @@
 ## Business Overview
 
-Based on the database structure, this appears to be a **project-based service business** that likely provides IT services, software development, or technical consulting. The company manages client projects from quotation through delivery, handles Annual Maintenance Contracts (AMC), tracks performance, and maintains detailed financial records including invoicing and payments.
+Based on the database structure, this appears to be a **project-based service business** that likely provides IT services, software development, or technical consulting. The company manages client projects from quotation through delivery, handles Annual Maintenance Contracts (AMCs), and tracks performance metrics. The "Ezee_BizFlow" name suggests it's designed to streamline business operations and workflow management.
 
-*Note: This is an inference based on the database structure. Please update this section with your actual business description.*
+*Note: This is an educated guess based on the data structure. Please update this section with your actual business description.*
 
 ## Key Tables and What They Mean
 
@@ -10,56 +10,57 @@ Based on the database structure, this appears to be a **project-based service bu
 - **ProSt** - Main project status tracking table with project codes, titles, customers, and sales amounts
 - **OPERATIONS** - Project operational details including start dates (PSD), delivery dates (PDD), and status
 - **CLIENT_MASTER** - Customer information including company details, tax IDs, and contact information
+- **PIC_MASTER** - "Person in Charge" - likely your internal team members assigned to projects
 
-**Sales and Quotations:**
-- **QUOTATION_MASTER/DETAILS** - Customer quotes with project details, rates, and amounts
-- **AMC_QUOTATION_MASTER/DETAILS** - Specialized quotes for Annual Maintenance Contracts
-
-**Purchase Orders and Contracts:**
+**Sales Process:**
+- **QUOTATION_MASTER/DETAILS** - Customer quotes and pricing breakdowns
 - **PO_MASTER/DETAILS** - Purchase orders received from clients with GST calculations
-- **AMC_MASTER** - Annual Maintenance Contract details with recurring service information
-
-**Financial Management:**
 - **INVOICE_DETAILS** - Billing information for completed work
-- **payment_information** - Payment tracking including received amounts and pending balances
-- **SPL_AND_AMC_PROJECTS** - Special projects and AMC billing details
 
-**Team and Performance:**
-- **PIC_MASTER** - Person In Charge (project managers/leads) with department and contact details
-- **USER_MASTER** - System users and employees
+**AMC (Annual Maintenance Contract) Management:**
+- **AMC_MASTER** - Ongoing maintenance contracts with customers
+- **AMC_QUOTATION_MASTER/DETAILS** - Quotes specifically for maintenance services
+- **AMC_PO_MASTER/DETAILS** - Purchase orders for AMC work
+
+**Financial Tracking:**
+- **payment_information** - Payment receipts and outstanding amounts
 - **Monthly_Target** - Department-wise revenue targets and achievements
-- **PERFORMANCE_EVALUATION/SCORE** - Employee performance tracking (currently unused)
+
+**Internal Management:**
+- **USER_MASTER** - Employee login and access control
+- **TICKET_DETAILS** - Internal task/issue tracking system
+- **NOTE_NOTIFICATIONS** - Project communication and updates
 
 ## Important Terminology
 
-- **PIC** - Person In Charge (likely project manager or team lead)
+- **Project_Code** - Unique identifier used across multiple tables to link project information
+- **PSD/PDD** - Likely "Project Start Date" and "Project Delivery Date"
+- **PIC** - Person in Charge (project manager or lead)
 - **AMC** - Annual Maintenance Contract (ongoing service agreements)
-- **PSD/PDD** - Likely Project Start Date/Project Delivery Date
-- **Project_Code** - Unique identifier linking projects across all systems
 - **CGST/SGST** - Central/State Goods and Services Tax (Indian tax system)
 - **GSTIN** - GST Identification Number
-- **PAN/TAN/CIN** - Indian business registration numbers
-- **ProSt** - Project Status (main project tracking table)
+- **IsInvoiced** - Flag indicating whether work has been billed
+- **BacklogAmount** - Revenue from previous periods still being worked on
 
 ## Data Quality Notes
 
 *Please review and update the following based on your actual data:*
 
 **Empty Tables to Investigate:**
-- AMC_PO_DETAILS and AMC_PO_MASTER (0 rows) - Are these new features or data migration issues?
-- PERFORMANCE_EVALUATION and PERFORMANCE_SCORE (0 rows) - Performance system not yet implemented?
-- SKILL_MASTER (0 rows) - Skills tracking planned but not active?
+- Performance evaluation tables are empty - are these new features?
+- AMC PO tables are empty - is AMC billing handled differently?
+- Skill master table is empty - planned feature?
 
 **Data Validation Needed:**
-- Check for consistent Project_Code usage across all tables
-- Verify customer information completeness in CLIENT_MASTER
-- Review payment reconciliation between invoices and payment_information
-- Confirm PIC assignments are current and accurate
+- Check for consistent Project_Code formatting across tables
+- Verify customer information is complete in CLIENT_MASTER
+- Review payment tracking completeness in payment_information
+- Confirm PIC assignments are current in PIC_MASTER
 
-**Recommended Reviews:**
-- Monthly_Target vs actual revenue achievement tracking
-- Outstanding payments and aging analysis
-- Project status accuracy and completion rates
-- AMC renewal tracking and scheduling
+**Potential Issues to Monitor:**
+- Invoice amounts vs. payment amounts reconciliation
+- Project status consistency between ProSt and OPERATIONS tables
+- GST calculations accuracy in PO tables
+- Monthly target vs. actual achievement tracking
 
-*Update this section with your specific data quality findings and business rules.*
+*Update this section with specific data quality rules and validation checks relevant to your business.*

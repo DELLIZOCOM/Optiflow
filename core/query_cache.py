@@ -56,5 +56,14 @@ def clear_expired() -> int:
     return len(expired)
 
 
+def clear() -> int:
+    """Evict all entries. Returns count removed."""
+    count = len(_cache)
+    _cache.clear()
+    if count:
+        logger.info(f"CACHE CLEARED: {count} entries removed")
+    return count
+
+
 def size() -> int:
     return len(_cache)

@@ -8,6 +8,8 @@ config/model_config.json
 config/db_config.json
 config/security.json
 config/business_context.json
+config/suggested_questions.json
+config/schema.json
 
 # =====================
 # Sensitive Logs & Data
@@ -18,6 +20,7 @@ logs/approved_queries.jsonl
 
 # Generated at runtime — schema files contain potentially sensitive DB info
 prompts/schema_context.txt
+prompts/schema_index.txt
 prompts/tables/
 
 # =====================

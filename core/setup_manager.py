@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,119 @@ def _write_table_file(table: dict) -> None:
 
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
+
+
+# ── Schema metadata ───────────────────────────────────────────────────────────
+
+_SCHEMA_META_PATH = os.path.join(_ROOT, "config", "schema.json")
+
+
+def save_schema_meta(tables_data: list, history_entry: dict | None = None) -> dict:
+    """Write config/schema.json with table count, column count, and refresh history.
+
+    history_entry: optional dict e.g. {"new_tables": 2, "removed_tables": 0}
+    Returns the written meta dict.
+    """
+    total_columns = sum(len(t.get("columns", [])) for t in tables_data)
+    now = datetime.utcnow().isoformat()
+
+    existing: dict = {}
+    if os.path.exists(_SCHEMA_META_PATH):
+        try:
+            with open(_SCHEMA_META_PATH, encoding="utf-8") as f:
+                existing = json.load(f)
+        except Exception:
+            pass
+
+    history: list = existing.get("refresh_history", [])
+    if history_entry is not None:
+        history.append({"timestamp": now, **history_entry})
+        history = history[-50:]   # keep last 50 entries
+
+    meta = {
+        "last_refreshed":  now,
+        "table_count":     len(tables_data),
+        "total_columns":   total_columns,
+        "refresh_history": history,
+    }
+    os.makedirs(os.path.dirname(_SCHEMA_META_PATH), exist_ok=True)
+    with open(_SCHEMA_META_PATH, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+    return meta
+
+
+def load_schema_meta() -> dict:
+    """Return the contents of config/schema.json, or {} if absent."""
+    if not os.path.exists(_SCHEMA_META_PATH):
+        return {}
+    try:
+        with open(_SCHEMA_META_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def load_old_schema_state() -> dict:
+    """Read current schema_index.txt + per-table files to get pre-refresh state.
+
+    Returns {table_name: {"row_count": int, "columns": [str]}}
+    Used by the refresh endpoint to compute the diff against new discovery.
+    """
+    result: dict = {}
+
+    # Parse schema_index.txt: "TableName | N,NNN rows | desc | Key columns: ..."
+    index_path = os.path.join(_ROOT, "prompts", "schema_index.txt")
+    if os.path.exists(index_path):
+        try:
+            with open(index_path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = [p.strip() for p in line.split("|")]
+                    if len(parts) >= 2:
+                        table_name = parts[0]
+                        try:
+                            row_count = int(
+                                parts[1].replace("rows", "").replace(",", "").strip()
+                            )
+                        except ValueError:
+                            row_count = 0
+                        result[table_name] = {"row_count": row_count, "columns": []}
+        except Exception:
+            pass
+
+    # Parse per-table files for column names
+    tables_dir = os.path.join(_ROOT, "prompts", "tables")
+    if os.path.isdir(tables_dir):
+        for fname in os.listdir(tables_dir):
+            if not fname.endswith(".txt"):
+                continue
+            table_name_from_file = None
+            columns: list = []
+            try:
+                in_columns = False
+                with open(os.path.join(tables_dir, fname), encoding="utf-8") as f:
+                    for line in f:
+                        stripped = line.rstrip()
+                        if stripped.startswith("TABLE: "):
+                            table_name_from_file = stripped[7:].strip()
+                        elif stripped.startswith("Columns ("):
+                            in_columns = True
+                        elif stripped.startswith("Distinct values"):
+                            in_columns = False
+                        elif in_columns and stripped.startswith("  "):
+                            col_name = stripped.strip().split()[0]
+                            if col_name:
+                                columns.append(col_name)
+                        elif in_columns and stripped and not stripped.startswith(" "):
+                            in_columns = False
+            except Exception:
+                pass
+            if table_name_from_file and table_name_from_file in result:
+                result[table_name_from_file]["columns"] = columns
+
+    return result
 
 
 # ── Status check ─────────────────────────────────────────────────────────────

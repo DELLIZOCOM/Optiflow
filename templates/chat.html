@@ -101,6 +101,68 @@
 
     .header-actions { display: flex; align-items: center; gap: 10px; }
 
+    /* ── Feedback bar ── */
+    .feedback-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 6px;
+      flex-wrap: wrap;
+    }
+    .fb-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 15px;
+      padding: 2px 5px;
+      border-radius: 5px;
+      opacity: 0.45;
+      transition: opacity 0.15s, background 0.15s;
+      line-height: 1;
+    }
+    .fb-btn:hover:not(:disabled) { opacity: 0.9; background: rgba(0,0,0,0.06); }
+    .fb-btn:disabled { cursor: default; }
+    .fb-btn.fb-active  { opacity: 1; }
+    .fb-btn.fb-grey    { opacity: 0.2; }
+    .fb-thanks {
+      font-size: 11.5px;
+      color: #666;
+      font-style: italic;
+      transition: opacity 0.4s;
+    }
+    .fb-comment {
+      width: 100%;
+      display: flex;
+      gap: 6px;
+      align-items: flex-start;
+      margin-top: 4px;
+    }
+    .fb-comment textarea {
+      flex: 1;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 12.5px;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 40px;
+      outline: none;
+      background: #fafafa;
+    }
+    .fb-comment textarea:focus { border-color: #888; background: #fff; }
+    .fb-submit {
+      background: #1a1a2e;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 5px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      align-self: flex-start;
+    }
+    .fb-submit:hover { background: #2e2e4e; }
+
     /* ── Chat area ── */
     .chat-area {
       flex: 1;
@@ -672,7 +734,8 @@
     <div class="header-actions">
       {% if user_role == 'admin' %}
       <a href="/admin/settings" class="btn-audit" target="_blank" rel="noopener">Settings</a>
-      <a href="/admin/audit" class="btn-audit" target="_blank" rel="noopener">Audit Log</a>
+      <a href="/admin/audit"    class="btn-audit" target="_blank" rel="noopener">Audit Log</a>
+      <a href="/admin/feedback" class="btn-audit" target="_blank" rel="noopener">Feedback</a>
       {% endif %}
       <form method="POST" action="/logout" style="margin:0;" onsubmit="sessionStorage.removeItem('optiflow_chat_history')">
         <button type="submit" class="btn-logout">Sign out</button>
@@ -690,17 +753,10 @@
   <div class="chat-area" id="chatArea">
   </div>
 
-  <div class="chips" id="chips">
-    <div class="chip" onclick="sendQuestion('How is the business doing?')">Business overview</div>
-    <div class="chip" onclick="sendQuestion('Pipeline breakdown?')">Pipeline breakdown?</div>
-    <div class="chip" onclick="sendQuestion('Pending invoices?')">Pending invoices?</div>
-    <div class="chip" onclick="sendQuestion('AMC expiring soon?')">AMC expiring soon?</div>
-    <div class="chip" onclick="sendQuestion('Active operations?')">Active operations?</div>
-    <div class="chip" onclick="sendQuestion('Open tickets?')">Open tickets?</div>
-  </div>
+  <div class="chips" id="chips"></div>
 
   <div class="input-bar">
-    <input type="text" id="questionInput" placeholder="Ask about projects, invoices, AMC, operations, or tickets..."
+    <input type="text" id="questionInput" placeholder="Ask anything about your data..."
       onkeydown="if(event.key==='Enter') sendFromInput()">
     <button id="sendBtn" onclick="sendFromInput()">Send</button>
   </div>
@@ -712,7 +768,22 @@ const sendBtn  = document.getElementById('sendBtn');
 const chipsDiv = document.getElementById('chips');
 let busy = false;
 
-// Pending queries keyed by card ID
+// ── Suggested question chips (loaded from server) ────────────────────────────
+
+(async function loadChips() {
+  try {
+    const res  = await fetch('/api/suggested-questions');
+    if (!res.ok) return;
+    const data = await res.json();
+    const questions = data.questions || [];
+    if (!questions.length) return;
+    chipsDiv.innerHTML = questions.map(q =>
+      `<div class="chip" onclick="sendQuestion(${JSON.stringify(q.question)})">${escHtml(q.label)}</div>`
+    ).join('');
+  } catch (_) { /* silently ignore — chips are non-critical */ }
+})();
+
+// ── Pending queries keyed by card ID
 const pendingQueries = {};
 let agentCardCounter = 0;
 
@@ -809,6 +880,85 @@ function _restoreHistory() {
   } catch (_) { return []; }
 }
 
+// ── Feedback system ──────────────────────────────────────────────────────────
+
+const _fbCtx = {};        // fbId → context object
+let   _fbCounter = 0;
+
+function addFeedbackBar(msgEl, ctx) {
+  const fbId = 'fb-' + (_fbCounter++);
+  _fbCtx[fbId] = ctx;
+
+  const bar = document.createElement('div');
+  bar.className = 'feedback-bar';
+  bar.id = fbId;
+  bar.innerHTML =
+    `<button class="fb-btn" id="${fbId}-up"   onclick="_fbClick('${fbId}','positive')" title="This answer is correct">👍</button>` +
+    `<button class="fb-btn" id="${fbId}-down" onclick="_fbClick('${fbId}','negative')" title="This answer is wrong or unhelpful">👎</button>` +
+    `<span class="fb-thanks" id="${fbId}-thanks"></span>` +
+    `<div class="fb-comment" id="${fbId}-comment" style="display:none;">` +
+      `<textarea id="${fbId}-text" placeholder="What was wrong? (optional)" rows="2"></textarea>` +
+      `<button class="fb-submit" onclick="_fbSubmit('${fbId}')">Submit</button>` +
+    `</div>`;
+  msgEl.appendChild(bar);
+}
+
+async function _fbClick(fbId, rating) {
+  const up   = document.getElementById(fbId + '-up');
+  const down = document.getElementById(fbId + '-down');
+  if (!up || up.disabled) return;
+
+  if (rating === 'positive') {
+    up.classList.add('fb-active');   down.classList.add('fb-grey');
+    up.disabled = true; down.disabled = true;
+    await _fbPost(fbId, 'positive', '');
+    _fbThanks(fbId, 'Thanks!');
+  } else {
+    down.classList.add('fb-active'); up.classList.add('fb-grey');
+    up.disabled = true; down.disabled = true;
+    const commentEl = document.getElementById(fbId + '-comment');
+    if (commentEl) { commentEl.style.display = 'flex'; }
+    const textEl = document.getElementById(fbId + '-text');
+    if (textEl) textEl.focus();
+  }
+}
+
+async function _fbSubmit(fbId) {
+  const textEl = document.getElementById(fbId + '-text');
+  const comment = textEl ? textEl.value.trim() : '';
+  await _fbPost(fbId, 'negative', comment);
+  const commentEl = document.getElementById(fbId + '-comment');
+  if (commentEl) commentEl.style.display = 'none';
+  _fbThanks(fbId, 'Thanks for the feedback!');
+}
+
+function _fbThanks(fbId, msg) {
+  const el = document.getElementById(fbId + '-thanks');
+  if (!el) return;
+  el.textContent = msg;
+  setTimeout(() => { if (el) el.textContent = ''; }, 2500);
+}
+
+async function _fbPost(fbId, rating, comment) {
+  const ctx = _fbCtx[fbId] || {};
+  try {
+    await fetch('/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rating,
+        comment,
+        question:         ctx.question         || '',
+        sql:              ctx.sql               || '',
+        answer:           ctx.answer            || '',
+        tables_used:      ctx.tables_used       || [],
+        response_time_ms: ctx.time_ms           || 0,
+        was_cached:       ctx.was_cached        || false,
+      }),
+    });
+  } catch (_) { /* non-critical — fire and forget */ }
+}
+
 function addMessage(text, type, meta) {
   const msg = document.createElement('div');
   msg.className = 'msg msg-' + type;
@@ -850,6 +1000,7 @@ function addAgentCard(question, data) {
     question,
     sql:         data.sql,
     tables_used: data.tables_used || [],
+    from_cache:  data.from_cache  || data.from_approved_log || false,
   };
 
   const conf      = data.confidence || 'none';
@@ -889,6 +1040,7 @@ function addChainCard(question, data) {
     steps:          data.steps || [],
     summary_prompt: data.summary_prompt || '',
     entity_label:   '',
+    from_cache:     data.from_cache || false,
   };
 
   const conf      = data.confidence || 'none';
@@ -942,6 +1094,7 @@ function addDeepDiveCard(question, data) {
     steps:          data.steps || [],
     summary_prompt: data.summary_prompt || '',
     entity_label:   data.entity_label || '',
+    from_cache:     data.from_cache || false,
   };
 
   const entityIcon = data.entity_type === 'project' ? '📋' : '🏢';
@@ -1040,8 +1193,16 @@ async function approveQuery(cardId) {
     const card = document.getElementById(cardId);
     if (card) card.remove();
     const rowWord = data.rows_returned === 1 ? 'row' : 'rows';
-    addMessage(data.answer || 'No results.', 'ai',
+    const msgEl = addMessage(data.answer || 'No results.', 'ai',
       `🤖 Agent · ${data.rows_returned} ${rowWord} · ${data.time_ms}ms`);
+    addFeedbackBar(msgEl, {
+      question:    pending.question,
+      sql:         pending.sql        || '',
+      answer:      data.answer        || '',
+      tables_used: pending.tables_used || [],
+      time_ms:     data.time_ms       || 0,
+      was_cached:  pending.from_cache  || false,
+    });
   } catch (err) {
     const card = document.getElementById(cardId);
     if (card) card.remove();
@@ -1142,8 +1303,19 @@ async function approveChain(cardId) {
 
     const totalRows = data.total_rows ?? 0;
     const rowWord   = totalRows === 1 ? 'row' : 'rows';
-    addMessage(data.answer || 'No results.', 'ai',
+    const chainMsgEl = addMessage(data.answer || 'No results.', 'ai',
       `${icon} ${isDeepDive ? 'Deep Dive' : 'Chain'} · ${totalRows} ${rowWord} · ${data.time_ms}ms`);
+    // Derive SQL preview from first step
+    const firstSql = (pending.steps || [])[0]?.sql || '';
+    const allTables = [...new Set((pending.steps || []).flatMap(s => s.tables || []))];
+    addFeedbackBar(chainMsgEl, {
+      question:    pending.question,
+      sql:         firstSql,
+      answer:      data.answer     || '',
+      tables_used: allTables,
+      time_ms:     data.time_ms    || 0,
+      was_cached:  pending.from_cache || false,
+    });
   } catch (err) {
     clearInterval(progressInterval);
     const card = document.getElementById(cardId);

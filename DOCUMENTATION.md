@@ -243,3 +243,6 @@ uvicorn app:app --port 8000
 ```
 
 Once running, navigate to `http://localhost:8000/`. If it is the first launch, the Setup Wizard will automatically initialize to connect your database and AI API keys.
+
+
+./start.sh

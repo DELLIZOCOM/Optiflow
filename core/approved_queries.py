@@ -66,8 +66,8 @@ def find_similar(question: str) -> dict | None:
     """Return the most similar approved-query entry, or None.
 
     Uses Jaccard similarity on content tokens (stop words removed).
-    Returns the entry dict (with keys: question, sql, tables_used, row_count,
-    timestamp) if similarity ≥ SIMILARITY_THRESHOLD, else None.
+    Skips entries flagged as wrong via user feedback.
+    Returns the entry dict if similarity ≥ SIMILARITY_THRESHOLD, else None.
     """
     if not os.path.exists(_LOG_PATH):
         return None
@@ -89,6 +89,10 @@ def find_similar(question: str) -> dict | None:
             except json.JSONDecodeError:
                 continue
 
+            # Skip entries flagged as wrong by user feedback, or stale (table removed)
+            if entry.get("flagged") or entry.get("stale"):
+                continue
+
             e_tokens = _tokens(entry.get("question", ""))
             if not e_tokens:
                 continue
@@ -104,8 +108,117 @@ def find_similar(question: str) -> dict | None:
     if best_entry and best_score >= SIMILARITY_THRESHOLD:
         logger.info(
             f"APPROVED LOG HIT: score={best_score:.2f}  "
+            f"confirmed={best_entry.get('confirmed', False)}  "
             f"'{best_entry['question'][:60]}'"
         )
         return best_entry
 
     return None
+
+
+def _update_entry(question: str, sql: str, updates: dict) -> bool:
+    """Rewrite the log with the first matching entry updated in-place.
+
+    Matches on question text (case-insensitive) OR first 200 chars of SQL.
+    Returns True if an entry was found and updated.
+    """
+    if not os.path.exists(_LOG_PATH):
+        return False
+
+    q_lower  = question.strip().lower()
+    sql_trim = sql.strip()[:200]
+    updated  = False
+    lines    = []
+
+    try:
+        with open(_LOG_PATH, encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    lines.append(line)
+                    continue
+                try:
+                    entry = json.loads(stripped)
+                    if (
+                        entry.get("question", "").strip().lower() == q_lower
+                        or entry.get("sql", "").strip()[:200] == sql_trim
+                    ):
+                        if not updated:   # update only the first match
+                            entry.update(updates)
+                            updated = True
+                    lines.append(json.dumps(entry, ensure_ascii=False) + "\n")
+                except json.JSONDecodeError:
+                    lines.append(line)
+
+        if updated:
+            with open(_LOG_PATH, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+    except OSError as e:
+        logger.error(f"_update_entry failed: {e}")
+        return False
+
+    return updated
+
+
+def flag_entry(question: str, sql: str) -> bool:
+    """Mark an entry as flagged (thumbs-down feedback).
+
+    Flagged entries are skipped by find_similar(), preventing reuse of bad SQL.
+    """
+    result = _update_entry(question, sql, {"flagged": True, "confirmed": False})
+    if result:
+        logger.info(f"APPROVED LOG FLAGGED: '{question[:60]}'")
+    return result
+
+
+def confirm_entry(question: str, sql: str) -> bool:
+    """Mark an entry as confirmed (thumbs-up feedback).
+
+    Confirmed status is logged for visibility; find_similar() prefers them.
+    """
+    result = _update_entry(question, sql, {"confirmed": True})
+    if result:
+        logger.info(f"APPROVED LOG CONFIRMED: '{question[:60]}'")
+    return result
+
+
+def mark_stale(removed_table_names: set) -> int:
+    """Mark approved queries that use any removed table as stale.
+
+    Stale entries are still kept in the log but skipped by find_similar()
+    when the tables they reference no longer exist in the schema.
+    Returns count of entries marked.
+    """
+    if not os.path.exists(_LOG_PATH) or not removed_table_names:
+        return 0
+
+    removed_lower = {t.lower() for t in removed_table_names}
+    count = 0
+    lines = []
+
+    try:
+        with open(_LOG_PATH, encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    lines.append(line)
+                    continue
+                try:
+                    entry = json.loads(stripped)
+                    tables = [t.lower() for t in entry.get("tables_used", [])]
+                    if any(t in removed_lower for t in tables) and not entry.get("stale"):
+                        entry["stale"] = True
+                        count += 1
+                    lines.append(json.dumps(entry, ensure_ascii=False) + "\n")
+                except json.JSONDecodeError:
+                    lines.append(line)
+
+        if count > 0:
+            with open(_LOG_PATH, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+            logger.info(f"APPROVED LOG: marked {count} entries stale (removed tables: {removed_table_names})")
+    except OSError as e:
+        logger.error(f"mark_stale failed: {e}")
+        return 0
+
+    return count

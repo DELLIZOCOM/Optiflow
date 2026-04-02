@@ -2,11 +2,11 @@ DATABASE SCHEMA: Ezee_BizFlow_Original
 Server: 192.168.1.198  |  Auto-generated from live database
 ==============================================================================
 
-TABLES (25 total): AMC_MASTER, AMC_PO_DETAILS, AMC_PO_MASTER, AMC_QUOTATION_DETAILS, AMC_QUOTATION_MASTER, CLIENT_MASTER, INVOICE_DETAILS, Monthly_Target, NOTE_NOTIFICATIONS, OPERATIONS, payment_information, PERFORMANCE_EVALUATION, PERFORMANCE_SCORE, PERFORMANCE_SETTINGS, PIC_MASTER, PO_DETAILS, PO_MASTER, ProSt, QUOTATION_DETAILS, QUOTATION_MASTER, SKILL_MASTER, SPL_AND_AMC_PROJECTS, TERMS_MASTER, TICKET_DETAILS, USER_MASTER
+TABLES (28 total): AMC_MASTER, AMC_PO_DETAILS, AMC_PO_MASTER, AMC_QUOTATION_DETAILS, AMC_QUOTATION_MASTER, CLIENT_MASTER, INVOICE_DETAILS, Monthly_Target, NOTE_NOTIFICATIONS, OPERATIONS, payment_information, PERFORMANCE_EVALUATION, PERFORMANCE_SCORE, PERFORMANCE_SETTINGS, PIC_MASTER, PO_DETAILS, PO_MASTER, PRIMARY_SKILLS, ProSt, QUOTATION_DETAILS, QUOTATION_MASTER, SECONDARY_SKILLS, SKILL_MASTER, SPL_AND_AMC_PROJECTS, SUB_SECONDARY_SKILLS, TERMS_MASTER, TICKET_DETAILS, USER_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: AMC_MASTER
-  Row count: 222
+  Row count: 51
   Columns (27):
     AmcID                               int                       NOT NULL
     ProjectCode                         nvarchar(5)               NULL
@@ -36,8 +36,9 @@ TABLE: AMC_MASTER
     Quotation_No                        nvarchar(-1)              NULL
     Po_Filename                         nvarchar(-1)              NULL
   Distinct values for key columns:
-    AMCCoverage: ['', '0', '12', '2', '24', '6']
-    Status: ['', 'Active', 'Awaiting PO', 'Under AMC', 'Under Coverage', 'Work In Progress']
+    PoNumber: ['', '01125614', 'PO : 01125614', 'There is no Purchase Order']
+    AMCCoverage: ['', '6']
+    Status: ['Awaiting PO', 'Under AMC', 'Work In Progress']
     AMC_Code: []
     Payment_Status: ['Received']
 
@@ -83,7 +84,7 @@ TABLE: AMC_PO_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: AMC_QUOTATION_DETAILS
-  Row count: 25
+  Row count: 26
   Columns (9):
     AMC_Detail_ID                       int                       NOT NULL
     Quotation_No                        nvarchar(50)              NOT NULL
@@ -95,13 +96,13 @@ TABLE: AMC_QUOTATION_DETAILS
     Total_Amount                        decimal                   NOT NULL
     Created_At                          datetime                  NOT NULL
   Distinct values for key columns:
-    Quotation_No: ['ECZAPT2526A063', 'ECZBUN(P)2526A064', 'ECZFAU2526A069', 'ECZHNT2526A072', 'ECZHNT2526A073', 'ECZHSL(AP)2526A071', 'ECZHTI2526A070', 'ECZKSH2526A055', 'ECZKSP2526A001', 'ECZKSP2526A057', 'ECZLSA2526A058', 'ECZPHA2526A068', 'ECZSHN2526A067', 'ECZSLL2526A066', 'ECZTHR(P)2526A061', 'ECZTHR2526A060', 'ECZVID2526A056', 'ECZYSI2526A062', 'ECZYSI2526A065']
-    Project_Code: ['0', '001', '002', '046', '083', '128', '248', '508', '626', '661', 'A007', 'A055', 'A056', 'A057', 'A058', 'OA65', 'OA67']
-    Customer_Code: ['APT', 'BUN(P)', 'FAU', 'HNT', 'HSL(AP)', 'HTI', 'KSH', 'KSP', 'LSA', 'PHA', 'SHN', 'SLL', 'THR', 'THR(P)', 'VID', 'YSI']
+    Quotation_No: ['ECZAPT2526A063', 'ECZBUN(P)2526A064', 'ECZFAU2526A069', 'ECZGLV2526A074', 'ECZHNT2526A072', 'ECZHNT2526A073', 'ECZHSL(AP)2526A071', 'ECZHTI2526A070', 'ECZKSH2526A055', 'ECZKSP2526A001', 'ECZKSP2526A057', 'ECZLSA2526A058', 'ECZPHA2526A068', 'ECZSHN2526A067', 'ECZSLL2526A066', 'ECZTHR(P)2526A061', 'ECZTHR2526A060', 'ECZVID2526A056', 'ECZYSI2526A062', 'ECZYSI2526A065']
+    Project_Code: ['0', '001', '002', '046', '083', '128', '129', '248', '508', '626', '661', 'A007', 'A055', 'A056', 'A057', 'A058', 'OA65', 'OA67']
+    Customer_Code: ['APT', 'BUN(P)', 'FAU', 'GLV', 'HNT', 'HSL(AP)', 'HTI', 'KSH', 'KSP', 'LSA', 'PHA', 'SHN', 'SLL', 'THR', 'THR(P)', 'VID', 'YSI']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: AMC_QUOTATION_MASTER
-  Row count: 19
+  Row count: 20
   Columns (8):
     AMC_Quote_ID                        int                       NOT NULL
     Quotation_No                        nvarchar(50)              NOT NULL
@@ -112,13 +113,13 @@ TABLE: AMC_QUOTATION_MASTER
     Quotation_Date                      date                      NOT NULL
     Created_At                          datetime                  NOT NULL
   Distinct values for key columns:
-    Quotation_No: ['ECZAPT2526A063', 'ECZBUN(P)2526A064', 'ECZFAU2526A069', 'ECZHNT2526A072', 'ECZHNT2526A073', 'ECZHSL(AP)2526A071', 'ECZHTI2526A070', 'ECZKSH2526A055', 'ECZKSP2526A001', 'ECZKSP2526A057', 'ECZLSA2526A058', 'ECZPHA2526A068', 'ECZSHN2526A067', 'ECZSLL2526A066', 'ECZTHR(P)2526A061', 'ECZTHR2526A059', 'ECZVID2526A056', 'ECZYSI2526A062', 'ECZYSI2526A065']
-    Project_Code: ['0', '001', '002', '046', '083', '128', '248', '508', '626', '661', 'A007', 'A055', 'A056', 'A057', 'A058', 'OA65', 'OA67']
-    Customer_Code: ['APT', 'BUN(P)', 'FAU', 'HNT', 'HSL(AP)', 'HTI', 'KSH', 'KSP', 'LSA', 'PHA', 'SHN', 'SLL', 'THR', 'THR(P)', 'VID', 'YSI']
+    Quotation_No: ['ECZAPT2526A063', 'ECZBUN(P)2526A064', 'ECZFAU2526A069', 'ECZGLV2526A074', 'ECZHNT2526A072', 'ECZHNT2526A073', 'ECZHSL(AP)2526A071', 'ECZHTI2526A070', 'ECZKSH2526A055', 'ECZKSP2526A001', 'ECZKSP2526A057', 'ECZLSA2526A058', 'ECZPHA2526A068', 'ECZSHN2526A067', 'ECZSLL2526A066', 'ECZTHR(P)2526A061', 'ECZTHR2526A059', 'ECZVID2526A056', 'ECZYSI2526A062', 'ECZYSI2526A065']
+    Project_Code: ['0', '001', '002', '046', '083', '128', '129', '248', '508', '626', '661', 'A007', 'A055', 'A056', 'A057', 'A058', 'OA65', 'OA67']
+    Customer_Code: ['APT', 'BUN(P)', 'FAU', 'GLV', 'HNT', 'HSL(AP)', 'HTI', 'KSH', 'KSP', 'LSA', 'PHA', 'SHN', 'SLL', 'THR', 'THR(P)', 'VID', 'YSI']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: CLIENT_MASTER
-  Row count: 126
+  Row count: 127
   Columns (21):
     client_ID_PK                        int                       NOT NULL
     client_Name                         nvarchar(200)             NOT NULL
@@ -152,7 +153,7 @@ TABLE: CLIENT_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: INVOICE_DETAILS
-  Row count: 140
+  Row count: 147
   Columns (39):
     Detail_ID                           int                       NOT NULL
     Invoice_No                          varchar(50)               NULL
@@ -202,7 +203,7 @@ TABLE: INVOICE_DETAILS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: Monthly_Target
-  Row count: 36
+  Row count: 42
   Columns (7):
     ID                                  int                       NOT NULL
     TargetAmount                        decimal                   NULL
@@ -235,7 +236,7 @@ TABLE: NOTE_NOTIFICATIONS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: OPERATIONS
-  Row count: 82
+  Row count: 85
   Columns (18):
     ID                                  int                       NOT NULL
     Project_Code                        nvarchar(50)              NOT NULL
@@ -260,7 +261,7 @@ TABLE: OPERATIONS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: payment_information
-  Row count: 149
+  Row count: 156
   Columns (11):
     payment_id                          int                       NOT NULL
     Project_Code                        varchar(50)               NOT NULL
@@ -276,7 +277,7 @@ TABLE: payment_information
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PERFORMANCE_EVALUATION
-  Row count: 0
+  Row count: 1
   Columns (10):
     EvaluationID                        bigint                    NOT NULL
     DepartmentID                        bigint                    NOT NULL
@@ -291,7 +292,7 @@ TABLE: PERFORMANCE_EVALUATION
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PERFORMANCE_SCORE
-  Row count: 0
+  Row count: 30
   Columns (8):
     ScoreID                             bigint                    NOT NULL
     EvaluationID                        bigint                    NOT NULL
@@ -302,7 +303,7 @@ TABLE: PERFORMANCE_SCORE
     Weakness                            nvarchar(-1)              NULL
     Remarks                             nvarchar(-1)              NULL
   Distinct values for key columns:
-    EmployeeID: []
+    EmployeeID: ['Sales', 'Sidharth', 'Sowndarya', 'Srini', 'Srinivasan S', 'Wester Anantharaj']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PERFORMANCE_SETTINGS
@@ -328,7 +329,7 @@ TABLE: PERFORMANCE_SETTINGS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PIC_MASTER
-  Row count: 138
+  Row count: 139
   Columns (10):
     ID                                  int                       NOT NULL
     Name                                nvarchar(255)             NOT NULL
@@ -343,7 +344,7 @@ TABLE: PIC_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PO_DETAILS
-  Row count: 138
+  Row count: 143
   Columns (13):
     PO_Detail_ID                        int                       NOT NULL
     PO_No                               varchar(50)               NOT NULL
@@ -364,7 +365,7 @@ TABLE: PO_DETAILS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PO_MASTER
-  Row count: 90
+  Row count: 94
   Columns (9):
     PO_ID                               int                       NOT NULL
     PO_No                               varchar(50)               NOT NULL
@@ -379,8 +380,21 @@ TABLE: PO_MASTER
     ConfirmationType: ['Email', 'PO', 'Verbal']
 
 ──────────────────────────────────────────────────────────────────────────────
+TABLE: PRIMARY_SKILLS
+  Row count: 0
+  Columns (5):
+    Primary_Skill_ID                    int                       NOT NULL
+    Skill_Code                          nvarchar(50)              NOT NULL
+    Skill_Name                          nvarchar(150)             NOT NULL
+    Created_By                          nvarchar(100)             NULL
+    Created_At                          datetime                  NULL
+  Distinct values for key columns:
+    Skill_Code: []
+    Created_By: []
+
+──────────────────────────────────────────────────────────────────────────────
 TABLE: ProSt
-  Row count: 289
+  Row count: 293
   Columns (41):
     ID                                  int                       NOT NULL
     Project_Code                        varchar(255)              NULL
@@ -428,11 +442,11 @@ TABLE: ProSt
     Project_ConfirmedBy: ['AMC', 'FOC', 'PO', 'Verbal']
     GSTIN: []
     State_Code: []
-    Internal_PIC: []
+    Internal_PIC: ['Select Internal PIC', 'Sidharth']
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: QUOTATION_DETAILS
-  Row count: 235
+  Row count: 238
   Columns (12):
     trans_ID_PK                         int                       NOT NULL
     cliend_ID_PK                        nvarchar(50)              NULL
@@ -449,7 +463,7 @@ TABLE: QUOTATION_DETAILS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: QUOTATION_MASTER
-  Row count: 143
+  Row count: 146
   Columns (19):
     quotation_ID_PK                     int                       NOT NULL
     quotation_NUMBER                    nvarchar(100)             NOT NULL
@@ -472,6 +486,21 @@ TABLE: QUOTATION_MASTER
     quotation_FILENAME                  nvarchar(255)             NULL
 
 ──────────────────────────────────────────────────────────────────────────────
+TABLE: SECONDARY_SKILLS
+  Row count: 0
+  Columns (7):
+    Secondary_Skill_ID                  int                       NOT NULL
+    Skill_Code                          nvarchar(50)              NOT NULL
+    Skill_Name                          nvarchar(150)             NOT NULL
+    Primary_Skill_ID                    int                       NOT NULL
+    Created_By                          nvarchar(100)             NULL
+    Created_At                          datetime                  NULL
+    Secondary_Skill_Description         nvarchar(500)             NULL
+  Distinct values for key columns:
+    Skill_Code: []
+    Created_By: []
+
+──────────────────────────────────────────────────────────────────────────────
 TABLE: SKILL_MASTER
   Row count: 0
   Columns (5):
@@ -485,7 +514,7 @@ TABLE: SKILL_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: SPL_AND_AMC_PROJECTS
-  Row count: 112
+  Row count: 108
   Columns (42):
     Detail_ID                           int                       NOT NULL
     Invoice_No                          varchar(50)               NULL
@@ -530,13 +559,28 @@ TABLE: SPL_AND_AMC_PROJECTS
     TAT_Payments_Closed                 int                       NULL
     PaymentsClosed_At                   datetime                  NULL
   Distinct values for key columns:
-    Line_Status: ['Invoiced', 'Payments Closed', 'Pending']
+    Line_Status: ['Invoiced', 'Payments Closed', 'Pending', 'Under Review']
     GST_Type: ['CGST', 'IGST', 'NA']
     State_Code: ['06', '24', '27', '29', '33', '37']
     HSN_Code: ['998216', '998314', '998346']
     AMC_Percentage: []
     sh_copy: ['0,0', '1,0', '1,1']
     EWOP: ['11 of 2026', '14 of 2026', '15 of 2026', '6 of 2026', '8 of 2026', '9 of 2026']
+
+──────────────────────────────────────────────────────────────────────────────
+TABLE: SUB_SECONDARY_SKILLS
+  Row count: 0
+  Columns (7):
+    Sub_Secondary_Skill_ID              int                       NOT NULL
+    Skill_Code                          nvarchar(50)              NOT NULL
+    Skill_Name                          nvarchar(150)             NOT NULL
+    Secondary_Skill_ID                  int                       NOT NULL
+    Created_By                          nvarchar(100)             NULL
+    Created_At                          datetime                  NULL
+    Sub_Secondary_Skill_Description     nvarchar(500)             NULL
+  Distinct values for key columns:
+    Skill_Code: []
+    Created_By: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: TERMS_MASTER
@@ -597,5 +641,5 @@ TABLE: USER_MASTER
     Reporting_To                        varchar(100)              NULL
   Distinct values for key columns:
     Username: ['Abarna', 'Ajay', 'Anbu', 'Aswinth', 'Chandramuki', 'Fazil Basha', 'Karthikeyan', 'Meena Krishnan', 'Mohanapriya', 'Mukesh', 'Nirmalkumar', 'Nithin Rodda', 'rakeshwaran', 'Sales', 'Santharaj', 'Sidharth', 'Singaraj', 'Sowndarya', 'Srini', 'Srinivasan S', 'testing', 'Theraj', 'Vignesh', 'Vijay', 'Wester Anantharaj']
-    Employee_ID: ['', 'ECZ014', 'ECZ033', 'ECZ034', 'NA']
+    Employee_ID: ['ECZ001', 'ECZ002', 'ECZ003', 'ECZ004', 'ECZ005', 'ECZ006', 'ECZ007', 'ECZ008', 'ECZ009', 'ECZ010', 'ECZ011', 'ECZ012', 'ECZ013', 'ECZ014', 'ECZ015', 'ECZ016', 'ECZ017', 'ECZ018', 'ECZ019', 'ECZ020', 'ECZ021', 'ECZ022', 'ECZ023', 'ECZ024', 'ECZ025']
     Reporting_To: ['Sales', 'Santharaj', 'Sidharth', 'Sowndarya']

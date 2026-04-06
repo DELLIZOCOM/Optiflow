@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OptiFlow AI</title>
+  <link rel="stylesheet" href="/static/css/chat.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+</head>
+
+<body>
+
+  <div class="header">
+    <div class="header-left">
+      <h1>OptiFlow AI</h1>
+      <p>Database Intelligence</p>
+    </div>
+  </div>
+
+  {% if db_warning %}
+  <div class="db-warn-banner" id="db-warn-banner">
+    <span>⚠ {{ db_warning }}</span>
+    <button onclick="document.getElementById('db-warn-banner').style.display='none'" title="Dismiss">✕</button>
+  </div>
+  {% endif %}
+
+  <div class="chat-area" id="chatArea">
+  </div>
+
+  <div class="input-bar">
+    <input type="text" id="questionInput" placeholder="Ask anything about your data..."
+      onkeydown="if(event.key==='Enter') sendFromInput()">
+    <button id="sendBtn" onclick="sendFromInput()">Send</button>
+  </div>
+
+  <script src="/static/js/chat.js"></script>
+</body>
+
+</html>

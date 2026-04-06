@@ -51,4 +51,4 @@ echo "  Open your browser and navigate there."
 echo "  Press Ctrl+C to stop."
 echo ""
 
-uvicorn app:app --host 0.0.0.0 --port "$PORT"
+uvicorn backend.app:app --host 0.0.0.0 --port "$PORT"

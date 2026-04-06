@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OptiFlow AI — Setup</title>
+  <link rel="stylesheet" href="/static/css/setup.css">
+</head>
+<body>
+
+  <div class="header">
+    <h1>OptiFlow AI</h1>
+    <p>First-time setup — connect OptiFlow to your database</p>
+  </div>
+
+  <div class="wizard-wrap">
+    <div class="wizard">
+
+      <!-- Step indicator (5 steps) -->
+      <div class="step-bar">
+        <div class="step-dot active" id="dot-1">
+          <div class="step-circle">1</div>
+          <div class="step-label">AI</div>
+        </div>
+        <div class="step-dot" id="dot-2">
+          <div class="step-circle">2</div>
+          <div class="step-label">Connect</div>
+        </div>
+        <div class="step-dot" id="dot-3">
+          <div class="step-circle">3</div>
+          <div class="step-label">Discover</div>
+        </div>
+        <div class="step-dot" id="dot-4">
+          <div class="step-circle">4</div>
+          <div class="step-label">Teach</div>
+        </div>
+        <div class="step-dot" id="dot-5">
+          <div class="step-circle">5</div>
+          <div class="step-label">Launch</div>
+        </div>
+      </div>
+
+      <!-- ── Step 1: Configure AI Provider ─────────────────────────────── -->
+      <div class="panel" id="panel-1">
+        <div class="panel-title">Configure AI Provider</div>
+        <div class="panel-subtitle">
+          OptiFlow uses an AI model for SQL generation and result interpretation.
+          Your API key is encrypted and stored in <code>config/model_config.json</code> — never in .env.
+        </div>
+
+        <div style="margin-bottom:20px;">
+          <div style="font-size:13px;font-weight:700;color:#1a1a2e;margin-bottom:10px;">Cloud AI — SQL Generation &amp; Interpretation</div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Provider</label>
+              <select id="inp-ai-provider" onchange="onProviderChange()" style="
+                width:100%; padding:9px 12px; border:1px solid #d0d0d0;
+                border-radius:7px; font-size:13px; background:#fff; color:#1a1a2e; outline:none;
+              ">
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="openai">OpenAI</option>
+                <option value="custom">Custom endpoint</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Model</label>
+              <input type="text" id="inp-ai-model" placeholder="claude-sonnet-4-20250514" autocomplete="off">
+            </div>
+          </div>
+
+          <div class="form-group" id="ai-endpoint-group" style="display:none;">
+            <label>Endpoint URL (OpenAI-compatible)</label>
+            <input type="text" id="inp-ai-endpoint" placeholder="https://api.example.com/v1" autocomplete="off">
+          </div>
+
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" id="inp-ai-key" placeholder="sk-ant-..." autocomplete="off">
+          </div>
+
+          <div class="status" id="ai-test-status"></div>
+          <div style="display:flex; gap:10px; align-items:center; margin-top:8px;">
+            <button class="btn btn-secondary" id="btn-test-ai" onclick="testAiKey()">Test API Key</button>
+            <span style="font-size:12px;color:#888;">Sends one minimal request to verify the key works.</span>
+          </div>
+        </div>
+
+        <div style="border-top:1px solid #e8e8e8; padding-top:18px; margin-top:4px;">
+          <div style="font-size:13px;font-weight:700;color:#1a1a2e;margin-bottom:6px;">Local AI — Intent Parsing (Optional)</div>
+          <div style="font-size:12px;color:#888;margin-bottom:12px;">
+            Use a local Ollama model for faster basic routing. Falls back to cloud AI automatically.
+          </div>
+
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;margin:0;">
+              <input type="checkbox" id="chk-local" onchange="onLocalToggle()" style="width:16px;height:16px;cursor:pointer;">
+              Use local model for faster basic routing
+            </label>
+          </div>
+
+          <div id="local-fields" style="display:none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Ollama endpoint</label>
+                <input type="text" id="inp-ollama-url" value="http://localhost:11434" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label>Model</label>
+                <input type="text" id="inp-ollama-model" value="qwen3:8b" autocomplete="off">
+              </div>
+            </div>
+            <div class="status" id="ollama-test-status"></div>
+            <div style="display:flex; gap:10px; align-items:center; margin-top:8px;">
+              <button class="btn btn-secondary" id="btn-test-ollama" onclick="testOllama()">Test Connection</button>
+              <span style="font-size:12px;color:#888;">Checks if Ollama is running at the given endpoint.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btn-next-1" onclick="saveAiConfig()" disabled>Save &amp; Continue →</button>
+        </div>
+      </div>
+
+      <!-- ── Step 2: Database Connection ────────────────────────────────── -->
+      <div class="panel hidden" id="panel-2">
+        <div class="panel-title">Database Connection</div>
+        <div class="panel-subtitle">Enter your SQL Server credentials. They'll be encrypted and saved to <code>config/db_config.json</code>.</div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Server host / IP</label>
+            <input type="text" id="inp-server" placeholder="192.168.1.100" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label>Database name</label>
+            <input type="text" id="inp-db" placeholder="MyDatabase" autocomplete="off">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Username</label>
+            <input type="text" id="inp-user" placeholder="sa" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="inp-pass" placeholder="••••••••">
+          </div>
+        </div>
+
+        <div class="status" id="conn-status"></div>
+
+        <!-- Permission check result (auto-shown after successful connection) -->
+        <div class="perm-box" id="perm-box">
+          <div class="perm-box-title" id="perm-title"></div>
+          <div id="perm-detail"></div>
+        </div>
+
+        <!-- SQL helper: shown for warning / blocked -->
+        <div class="sql-helper" id="perm-sql">
+          <div class="sql-helper-toggle" onclick="toggleSqlHelper()">
+            <span>How to create a read-only database user</span>
+            <span id="sql-chevron">▼</span>
+          </div>
+          <div class="sql-helper-body" id="perm-sql-body">
+            <pre id="perm-sql-text"></pre>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="goTo(1)">← Back</button>
+          <button class="btn btn-secondary" id="btn-test" onclick="testConnection()">Test Connection</button>
+          <button class="btn btn-primary" id="btn-next-2" onclick="goTo(3)" disabled>Continue →</button>
+        </div>
+      </div>
+
+      <!-- ── Step 3: Schema Discovery ───────────────────────────────────── -->
+      <div class="panel hidden" id="panel-3">
+        <div class="panel-title">Schema Discovery</div>
+        <div class="panel-subtitle" id="disc-subtitle">OptiFlow will scan your database tables, columns, and sample values to build its understanding of your data.</div>
+
+        <div class="status" id="disc-status"></div>
+
+        <div id="disc-btn-wrap">
+          <button class="btn btn-primary" id="btn-disc" onclick="discoverSchema()">Run Schema Discovery</button>
+        </div>
+
+        <div id="tables-grid" class="table-grid" style="display:none;"></div>
+
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="goTo(2)">← Back</button>
+          <button class="btn btn-primary" id="btn-next-3" onclick="goTo(4)" disabled>Continue →</button>
+        </div>
+      </div>
+
+      <!-- ── Step 4: Company Knowledge ──────────────────────────────────── -->
+      <div class="panel hidden" id="panel-4">
+        <div class="panel-title">Teach OptiFlow About Your Business</div>
+        <div class="panel-subtitle">
+          OptiFlow analyzed your database and wrote this knowledge document. Review and correct anything that's wrong —
+          the more accurate this is, the better OptiFlow understands your business.
+          <br><span style="color:#aaa; font-size:12px;">You can edit this at any time in Settings → Company Knowledge.</span>
+        </div>
+
+        <!-- Loading state -->
+        <div id="teach-loading" style="text-align:center; padding:52px 0; display:none;">
+          <div style="display:inline-block; width:38px; height:38px; border:3px solid #e0e0e0;
+               border-top-color:#1a1a2e; border-radius:50%; animation:spin 0.8s linear infinite;
+               margin-bottom:18px;"></div>
+          <div style="color:#444; font-size:14px; font-weight:500;">Analyzing your database schema…</div>
+          <div style="color:#aaa; font-size:12px; margin-top:6px;">This may take 15–30 seconds</div>
+        </div>
+
+        <!-- Error (shown only if draft fails entirely) -->
+        <div id="teach-error" style="display:none; background:#ffe3e3; color:#c92a2a;
+             border:1px solid #ffb3b3; border-radius:8px; padding:12px 16px;
+             font-size:13px; margin-bottom:16px;"></div>
+
+        <!-- Editor + follow-up (shown after draft loads) -->
+        <div id="teach-editor-section" style="display:none;">
+
+          <!-- Edit / Preview tabs -->
+          <div style="display:flex; border-bottom:2px solid #e8e8e8;">
+            <button id="tab-edit" onclick="switchTeachTab('edit')" style="
+              padding:8px 20px; font-size:13px; font-weight:600; cursor:pointer;
+              border:none; background:none; color:#4c6ef5;
+              border-bottom:2px solid #4c6ef5; margin-bottom:-2px;">Edit</button>
+            <button id="tab-preview" onclick="switchTeachTab('preview')" style="
+              padding:8px 20px; font-size:13px; font-weight:600; cursor:pointer;
+              border:none; background:none; color:#aaa;
+              border-bottom:2px solid transparent; margin-bottom:-2px;">Preview</button>
+          </div>
+
+          <textarea id="inp-company-md" rows="22" style="
+            width:100%; padding:16px;
+            font-family:'SFMono-Regular','Consolas',monospace;
+            font-size:12.5px; line-height:1.75;
+            border:1px solid #d0d0d0; border-top:none; border-radius:0 0 8px 8px;
+            resize:vertical; outline:none; color:#1a1a2e; background:#fafeff;
+          " placeholder="Generating…"></textarea>
+
+          <div id="md-preview" style="
+            display:none; padding:20px 24px;
+            border:1px solid #d0d0d0; border-top:none; border-radius:0 0 8px 8px;
+            max-height:480px; overflow-y:auto;
+            font-size:13.5px; line-height:1.75; color:#1a1a2e;
+          "></div>
+
+          <!-- Follow-up questions (loaded after draft) -->
+          <div id="followup-section" style="display:none; margin-top:28px;">
+            <div style="font-size:14px; font-weight:700; color:#1a1a2e; margin-bottom:4px;">
+              A few questions to fill in the gaps
+            </div>
+            <div style="font-size:12.5px; color:#888; margin-bottom:18px;">
+              OptiFlow couldn't infer these from the schema alone. Your answers will be appended to the knowledge file.
+            </div>
+            <div id="followup-questions"></div>
+          </div>
+
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="goTo(3)">← Back</button>
+          <button class="btn btn-secondary" id="btn-teach-skip" onclick="goTo(5)">Skip →</button>
+          <button class="btn btn-primary"   id="btn-teach-save" onclick="saveCompanyKnowledge()" style="display:none;">Save &amp; Continue →</button>
+        </div>
+      </div>
+
+      <!-- ── Step 5: Done ───────────────────────────────────────────────── -->
+      <div class="panel hidden" id="panel-5" style="text-align:center;">
+        <div class="done-icon">✓</div>
+        <div class="panel-title" style="margin-bottom:8px;">Setup Complete</div>
+        <div class="panel-subtitle" style="margin-bottom:0;" id="done-subtitle">OptiFlow is connected and ready.</div>
+
+        <div class="done-grid" id="done-grid"></div>
+
+        <div class="btn-row" style="justify-content:center; margin-top:8px;">
+          <a href="/" class="btn btn-success" style="text-decoration:none;">Launch OptiFlow →</a>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="/static/js/setup.js"></script>
+</body>
+</html>

@@ -12,6 +12,27 @@ config/suggested_questions.json
 config/schema.json
 
 # =====================
+# data/ directory (new modular layout)
+# =====================
+data/config/users.json
+data/config/.secret
+data/config/model_config.json
+data/config/db_config.json
+data/config/security.json
+data/config/business_context.json
+data/knowledge/suggested_questions.json
+data/knowledge/company.md
+
+# Generated at runtime — schema files contain potentially sensitive DB info
+data/prompts/schema_context.txt
+data/prompts/schema_index.txt
+data/prompts/tables/
+data/logs/audit.jsonl
+data/logs/audit.jsonl.*
+data/logs/approved_queries.jsonl
+data/logs/feedback.jsonl
+
+# =====================
 # Sensitive Logs & Data
 # =====================
 logs/audit.jsonl

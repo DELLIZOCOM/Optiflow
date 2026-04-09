@@ -72,4 +72,10 @@ def create_agent_router(orchestrator) -> APIRouter:
             "total_sessions": orchestrator._sessions.session_count(),
         })
 
+    @r.delete("/session/{session_id}")
+    async def session_clear(session_id: str):
+        """Clear conversation history for this session. Agent starts fresh next turn."""
+        orchestrator._sessions.destroy(session_id)
+        return JSONResponse({"success": True, "session_id": session_id})
+
     return r

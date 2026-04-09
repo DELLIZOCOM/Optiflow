@@ -1,5 +1,5 @@
 TABLE: QUOTATION_DETAILS
-Row count: 240
+Row count: 241
 Columns (12):
   trans_ID_PK                         int                       NOT NULL
   cliend_ID_PK                        nvarchar(50)              NULL

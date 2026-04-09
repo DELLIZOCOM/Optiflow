@@ -1,5 +1,5 @@
 TABLE: SECONDARY_SKILLS
-Row count: 17
+Row count: 0
 Columns (7):
   Secondary_Skill_ID                  int                       NOT NULL
   Skill_Code                          nvarchar(50)              NOT NULL
@@ -9,5 +9,5 @@ Columns (7):
   Created_At                          datetime                  NULL
   Secondary_Skill_Description         nvarchar(500)             NULL
 Distinct values for key columns:
-  Skill_Code: ['SKL-DEL-001', 'SKL-DEL-002', 'SKL-DEV-001', 'SKL-DEV-002', 'SKL-IMP-001', 'SKL-IMP-002', 'SKL-SAL-001', 'SKL-SOL-001', 'SKL-SOL-002', 'SKL-SOL-003', 'SKL-TES-001', 'SKL-TES-002', 'SKL-TES-003', 'SKL-TES-004', 'SKL-TES-005', 'SKL-TRA-001', 'SKL-TRA-002']
-  Created_By: ['Aswinth', 'Karthi']
+  Skill_Code: []
+  Created_By: []

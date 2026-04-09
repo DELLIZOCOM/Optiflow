@@ -18,9 +18,11 @@ Event types emitted by ask_stream:
     {"type": "error",       "message": "...", "retry_after"?: N}
 """
 
+import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 
@@ -109,17 +111,37 @@ class AgentOrchestrator:
         self._max_iter = max_iterations
 
     def _build_system_prompt(self) -> str:
-        from app.agent.prompts import build_system_prompt
+        from app.agent.prompts import SYSTEM_PROMPT
         from app.config import COMPANY_MD_PATH
 
-        knowledge_context = ""
+        prompt = SYSTEM_PROMPT
+
+        # Inject connected source names so the agent never has to guess
+        sources = self._sources.get_all()
+        if len(sources) == 1:
+            s = sources[0]
+            prompt += (
+                f"\n\n## Connected Database\n\n"
+                f"Source name: `{s.name}` | Type: {s.get_db_type().upper()} | "
+                f"Database: {s.get_database_name()}\n"
+                f"Use `{s.name}` as the `source` value in any tool call that asks for it."
+            )
+        elif len(sources) > 1:
+            prompt += "\n\n## Connected Databases\n\n"
+            for s in sources:
+                prompt += f"- `{s.name}` ({s.get_db_type().upper()}, db: {s.get_database_name()})\n"
+            prompt += "\nSpecify the correct `source` name in every tool call."
+
+        # Append company knowledge — the agent's domain map
         try:
             if COMPANY_MD_PATH.exists():
-                knowledge_context = COMPANY_MD_PATH.read_text(encoding="utf-8")
+                content = COMPANY_MD_PATH.read_text(encoding="utf-8").strip()
+                if content:
+                    prompt += f"\n\n## Business Context\n\n{content}"
         except Exception:
             pass
 
-        return build_system_prompt(self._sources, knowledge_context)
+        return prompt
 
     # ── Non-streaming ─────────────────────────────────────────────────────────
 
@@ -173,6 +195,7 @@ class AgentOrchestrator:
         tools_used: list = []
         queries_executed = 0
         iteration        = 0
+        _last_call_ts    = 0.0   # monotonic timestamp of last LLM call
 
         yield {"type": "status", "message": "Starting analysis…"}
 
@@ -182,12 +205,25 @@ class AgentOrchestrator:
                 logger.info(f"[Agent] Iteration {iteration}")
                 yield {"type": "status", "message": f"Thinking… (step {iteration})"}
 
+                # ── 200 ms minimum gap between LLM calls ──────────────────────
+                elapsed = time.monotonic() - _last_call_ts
+                if elapsed < 0.2:
+                    await asyncio.sleep(0.2 - elapsed)
+
+                # ── On the penultimate iteration, remove tools to force answer ─
+                force_final = (iteration >= self._max_iter - 1)
+                call_tools  = None if force_final else self._registry.get_api_definitions()
+                if force_final:
+                    logger.info("[Agent] Forcing final answer — tools disabled")
+                    yield {"type": "status", "message": "Composing final answer…"}
+
                 # ── LLM call ──────────────────────────────────────────────────
+                _last_call_ts = time.monotonic()
                 try:
                     response = await self._ai.complete(
                         messages=messages,
                         system=system,
-                        tools=self._registry.get_api_definitions(),
+                        tools=call_tools,
                     )
                 except RateLimitExhausted as rl:
                     self._sessions.set_messages(session_id, messages)
@@ -297,14 +333,11 @@ class AgentOrchestrator:
                 }
                 return
 
-            # Max iterations reached
+            # Max iterations reached (force_final should have caught this, but just in case)
             self._sessions.set_messages(session_id, messages)
             yield {
                 "type":    "error",
-                "message": (
-                    f"Agent reached the maximum of {self._max_iter} steps without "
-                    "a final answer. Try a more specific question."
-                ),
+                "message": "Agent reached the step limit without a final answer. Try a more specific question.",
             }
 
         except Exception as exc:

@@ -15,14 +15,14 @@ PERFORMANCE_SETTINGS | 5 rows | Business data table | Key columns: Rating_ID, Ra
 PIC_MASTER | 139 rows | Master reference data | Key columns: ID, ClientCode, Name, Status, CreatedDate
 PO_DETAILS | 144 rows | Business data table | Key columns: Item_Name, PO_Detail_ID, PO_No, HSN_Code, Amount
 PO_MASTER | 95 rows | Master reference data | Key columns: Project_Title, PO_Total_Amount, GST_Total_Amount, PO_ID, PO_No
-PRIMARY_SKILLS | 8 rows | Business data table | Key columns: Primary_Skill_ID, Skill_Code, Skill_Name
+PRIMARY_SKILLS | 0 rows | Business data table | Key columns: Primary_Skill_ID, Skill_Code, Skill_Name
 ProSt | 298 rows | Project-related records | Key columns: Project_Code, State_Code, Project_Title, Project_Status, ID
-QUOTATION_DETAILS | 240 rows | Business data table | Key columns: trans_ID_PK, cliend_ID_PK, trans_QUOTATION_ID_FK, ID, QUOTATION_DATE
-QUOTATION_MASTER | 148 rows | Master reference data | Key columns: quotation_CLIENT_ID_FK, quotation_PROJECT_CODE, quotation_PROJECT_NAME, quotation_ID_PK, quotation_NUMBER
-SECONDARY_SKILLS | 17 rows | Business data table | Key columns: Secondary_Skill_ID, Skill_Code, Primary_Skill_ID, Skill_Name
+QUOTATION_DETAILS | 241 rows | Business data table | Key columns: trans_ID_PK, cliend_ID_PK, trans_QUOTATION_ID_FK, ID, QUOTATION_DATE
+QUOTATION_MASTER | 149 rows | Master reference data | Key columns: quotation_CLIENT_ID_FK, quotation_PROJECT_CODE, quotation_PROJECT_NAME, quotation_ID_PK, quotation_NUMBER
+SECONDARY_SKILLS | 0 rows | Business data table | Key columns: Secondary_Skill_ID, Skill_Code, Primary_Skill_ID, Skill_Name
 SKILL_MASTER | 0 rows | Master reference data | Key columns: ID, Parent_Skill_ID, Skill_Name
-SPL_AND_AMC_PROJECTS | 111 rows | Project records and tracking | Key columns: Project_Code, State_Code, Inv_Project_Title, Total_Amount, Original_Total_Amount
-SUB_SECONDARY_SKILLS | 53 rows | Business data table | Key columns: Sub_Secondary_Skill_ID, Skill_Code, Secondary_Skill_ID, Skill_Name
+SPL_AND_AMC_PROJECTS | 112 rows | Project records and tracking | Key columns: Project_Code, State_Code, Inv_Project_Title, Total_Amount, Original_Total_Amount
+SUB_SECONDARY_SKILLS | 0 rows | Business data table | Key columns: Sub_Secondary_Skill_ID, Skill_Code, Secondary_Skill_ID, Skill_Name
 TERMS_MASTER | 3 rows | Master reference data | Key columns: tc_ID, tc_Title, tc_Status, tc_CreatedDate, tc_UpdatedDate
 TICKET_DETAILS | 9 rows | Business data table | Key columns: ID, Ticket_ID, Last_Approval_Notify, Task_Title, Date_Of_Delivery
 USER_MASTER | 25 rows | Master reference data | Key columns: ID, Employee_ID, Username, FirstName, LastName

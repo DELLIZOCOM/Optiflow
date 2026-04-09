@@ -2,47 +2,26 @@
 # Secrets & Credentials
 # =====================
 .env
-config/users.json
-config/.secret
-config/model_config.json
-config/db_config.json
-config/security.json
-config/business_context.json
-config/suggested_questions.json
-config/schema.json
-
-# =====================
-# data/ directory (new modular layout)
-# =====================
-data/config/users.json
 data/config/.secret
+data/config/app.json
 data/config/model_config.json
-data/config/db_config.json
 data/config/security.json
-data/config/business_context.json
-data/knowledge/suggested_questions.json
-data/knowledge/company.md
+data/config/sources/
 
-# Generated at runtime — schema files contain potentially sensitive DB info
-data/prompts/schema_context.txt
-data/prompts/schema_index.txt
-data/prompts/tables/
+# =====================
+# Runtime data (generated, may contain sensitive DB info)
+# =====================
+data/sources/
+data/knowledge/company.md
+data/knowledge/suggested_questions.json
 data/logs/audit.jsonl
 data/logs/audit.jsonl.*
 data/logs/approved_queries.jsonl
+data/logs/queries.jsonl
 data/logs/feedback.jsonl
-
-# =====================
-# Sensitive Logs & Data
-# =====================
-logs/audit.jsonl
-logs/audit.jsonl.*
-logs/approved_queries.jsonl
-
-# Generated at runtime — schema files contain potentially sensitive DB info
-prompts/schema_context.txt
-prompts/schema_index.txt
-prompts/tables/
+data/prompts/schema_context.txt
+data/prompts/schema_index.txt
+data/prompts/tables/
 
 # =====================
 # Python

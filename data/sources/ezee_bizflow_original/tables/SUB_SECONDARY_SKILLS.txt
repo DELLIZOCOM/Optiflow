@@ -1,5 +1,5 @@
 TABLE: SUB_SECONDARY_SKILLS
-Row count: 53
+Row count: 0
 Columns (7):
   Sub_Secondary_Skill_ID              int                       NOT NULL
   Skill_Code                          nvarchar(50)              NOT NULL
@@ -9,4 +9,5 @@ Columns (7):
   Created_At                          datetime                  NULL
   Sub_Secondary_Skill_Description     nvarchar(500)             NULL
 Distinct values for key columns:
-  Created_By: ['Aswinth', 'Karthi']
+  Skill_Code: []
+  Created_By: []

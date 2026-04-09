@@ -1,5 +1,5 @@
 TABLE: SPL_AND_AMC_PROJECTS
-Row count: 111
+Row count: 112
 Columns (42):
   Detail_ID                           int                       NOT NULL
   Invoice_No                          varchar(50)               NULL

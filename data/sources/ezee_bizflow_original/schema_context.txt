@@ -381,7 +381,7 @@ TABLE: PO_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: PRIMARY_SKILLS
-  Row count: 8
+  Row count: 0
   Columns (5):
     Primary_Skill_ID                    int                       NOT NULL
     Skill_Code                          nvarchar(50)              NOT NULL
@@ -389,8 +389,8 @@ TABLE: PRIMARY_SKILLS
     Created_By                          nvarchar(100)             NULL
     Created_At                          datetime                  NULL
   Distinct values for key columns:
-    Skill_Code: ['SKL-DEL', 'SKL-DEV', 'SKL-FIN', 'SKL-IMP', 'SKL-SAL', 'SKL-SOL', 'SKL-TES', 'SKL-TRA']
-    Created_By: ['Karthi']
+    Skill_Code: []
+    Created_By: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: ProSt
@@ -447,7 +447,7 @@ TABLE: ProSt
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: QUOTATION_DETAILS
-  Row count: 240
+  Row count: 241
   Columns (12):
     trans_ID_PK                         int                       NOT NULL
     cliend_ID_PK                        nvarchar(50)              NULL
@@ -464,7 +464,7 @@ TABLE: QUOTATION_DETAILS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: QUOTATION_MASTER
-  Row count: 148
+  Row count: 149
   Columns (19):
     quotation_ID_PK                     int                       NOT NULL
     quotation_NUMBER                    nvarchar(100)             NOT NULL
@@ -488,7 +488,7 @@ TABLE: QUOTATION_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: SECONDARY_SKILLS
-  Row count: 17
+  Row count: 0
   Columns (7):
     Secondary_Skill_ID                  int                       NOT NULL
     Skill_Code                          nvarchar(50)              NOT NULL
@@ -498,8 +498,8 @@ TABLE: SECONDARY_SKILLS
     Created_At                          datetime                  NULL
     Secondary_Skill_Description         nvarchar(500)             NULL
   Distinct values for key columns:
-    Skill_Code: ['SKL-DEL-001', 'SKL-DEL-002', 'SKL-DEV-001', 'SKL-DEV-002', 'SKL-IMP-001', 'SKL-IMP-002', 'SKL-SAL-001', 'SKL-SOL-001', 'SKL-SOL-002', 'SKL-SOL-003', 'SKL-TES-001', 'SKL-TES-002', 'SKL-TES-003', 'SKL-TES-004', 'SKL-TES-005', 'SKL-TRA-001', 'SKL-TRA-002']
-    Created_By: ['Aswinth', 'Karthi']
+    Skill_Code: []
+    Created_By: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: SKILL_MASTER
@@ -515,7 +515,7 @@ TABLE: SKILL_MASTER
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: SPL_AND_AMC_PROJECTS
-  Row count: 111
+  Row count: 112
   Columns (42):
     Detail_ID                           int                       NOT NULL
     Invoice_No                          varchar(50)               NULL
@@ -570,7 +570,7 @@ TABLE: SPL_AND_AMC_PROJECTS
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: SUB_SECONDARY_SKILLS
-  Row count: 53
+  Row count: 0
   Columns (7):
     Sub_Secondary_Skill_ID              int                       NOT NULL
     Skill_Code                          nvarchar(50)              NOT NULL
@@ -580,7 +580,8 @@ TABLE: SUB_SECONDARY_SKILLS
     Created_At                          datetime                  NULL
     Sub_Secondary_Skill_Description     nvarchar(500)             NULL
   Distinct values for key columns:
-    Created_By: ['Aswinth', 'Karthi']
+    Skill_Code: []
+    Created_By: []
 
 ──────────────────────────────────────────────────────────────────────────────
 TABLE: TERMS_MASTER

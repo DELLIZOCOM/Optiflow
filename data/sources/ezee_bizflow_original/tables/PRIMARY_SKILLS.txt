@@ -1,5 +1,5 @@
 TABLE: PRIMARY_SKILLS
-Row count: 8
+Row count: 0
 Columns (5):
   Primary_Skill_ID                    int                       NOT NULL
   Skill_Code                          nvarchar(50)              NOT NULL
@@ -7,5 +7,5 @@ Columns (5):
   Created_By                          nvarchar(100)             NULL
   Created_At                          datetime                  NULL
 Distinct values for key columns:
-  Skill_Code: ['SKL-DEL', 'SKL-DEV', 'SKL-FIN', 'SKL-IMP', 'SKL-SAL', 'SKL-SOL', 'SKL-TES', 'SKL-TRA']
-  Created_By: ['Karthi']
+  Skill_Code: []
+  Created_By: []

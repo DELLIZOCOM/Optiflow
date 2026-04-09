@@ -190,12 +190,6 @@ class MSSQLSource(DatabaseSource):
         table_names = [row[0] for row in cursor.fetchall()]
 
         tables_data = []
-        schema_lines = [
-            f"DATABASE SCHEMA: {db_name}",
-            f"Server: {server}  |  Auto-generated from live database",
-            "=" * 78, "",
-            f"TABLES ({len(table_names)} total): {', '.join(table_names)}", "",
-        ]
 
         for table_name in table_names:
             try:
@@ -245,28 +239,12 @@ class MSSQLSource(DatabaseSource):
                 "columns": columns, "categorical": categorical,
             })
 
-            schema_lines.append("─" * 78)
-            schema_lines.append(f"TABLE: {table_name}")
-            schema_lines.append(f"  Row count: {row_count}")
-            schema_lines.append(f"  Columns ({len(columns)}):")
-            for col in columns:
-                null_str = "NULL" if col["nullable"] else "NOT NULL"
-                schema_lines.append(f"    {col['name']:<35} {col['type']:<25} {null_str}")
-            if categorical:
-                schema_lines.append("  Distinct values for key columns:")
-                for col_name, vals in categorical.items():
-                    schema_lines.append(f"    {col_name}: {vals}")
-            schema_lines.append("")
-
-        # Write schema_context.txt
-        self._schema_dir.mkdir(parents=True, exist_ok=True)
-        (self._schema_dir / "schema_context.txt").write_text(
-            "\n".join(schema_lines), encoding="utf-8"
-        )
-
-        # Write schema_index.txt and per-table files
+        # Write schema_index.md and per-table .md files
         try:
-            write_schema_index(tables_data, self._schema_dir)
+            write_schema_index(
+                tables_data, self._schema_dir,
+                source_name=self._name, db_type=self.get_db_type(),
+            )
             tables_dir = self._schema_dir / "tables"
             for t in tables_data:
                 write_table_file(t, tables_dir)
@@ -275,7 +253,7 @@ class MSSQLSource(DatabaseSource):
                 f"→ data/sources/{self._name}/"
             )
         except Exception as exc:
-            logger.warning(f"[{self._name}] Split schema files failed (non-fatal): {exc}")
+            logger.warning(f"[{self._name}] Schema file write failed (non-fatal): {exc}")
 
         return {"db_name": db_name, "server": server, "tables": tables_data}
 

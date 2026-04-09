@@ -1,5 +1,5 @@
 TABLE: QUOTATION_MASTER
-Row count: 148
+Row count: 149
 Columns (19):
   quotation_ID_PK                     int                       NOT NULL
   quotation_NUMBER                    nvarchar(100)             NOT NULL

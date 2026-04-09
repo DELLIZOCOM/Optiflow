@@ -111,6 +111,13 @@ class SessionStore:
             self._sessions.pop(session_id, None)
         logger.info(f"SessionStore: destroyed session {session_id}")
 
+    def clear_all(self) -> None:
+        """Destroy all sessions immediately."""
+        with self._lock:
+            count = len(self._sessions)
+            self._sessions.clear()
+        logger.info(f"SessionStore: cleared {count} session(s)")
+
     def session_count(self) -> int:
         """Return the current number of live sessions."""
         with self._lock:

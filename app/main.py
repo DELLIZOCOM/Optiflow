@@ -124,7 +124,7 @@ def create_app() -> FastAPI:
         build_tool_registry()
 
         # 3. Wire registries into setup + sources routers
-        setup_init(_source_registry, _tool_registry)
+        setup_init(_source_registry, _tool_registry, _sessions)
         sources_init(_source_registry, _tool_registry)
 
         # 4. Create orchestrator

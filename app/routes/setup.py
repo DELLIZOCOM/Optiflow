@@ -33,7 +33,7 @@ from app.config import (
     load_ai_config, save_ai_config,
     load_source_configs, save_source_config,
     is_ai_configured, is_setup_complete,
-    COMPANY_MD_PATH, SOURCES_CONFIG_DIR, SOURCES_DATA_DIR, SECURITY_PATH,
+    DATA_DIR, COMPANY_MD_PATH, SOURCES_CONFIG_DIR, SOURCES_DATA_DIR, SECURITY_PATH,
 )
 from app.ai.client import test_connection as test_ai_connection, get_completion
 from app.utils.helpers import safe_json, sanitize_name
@@ -44,12 +44,14 @@ logger = logging.getLogger(__name__)
 # Injected by main.py after startup
 _source_registry = None
 _tool_registry   = None
+_sessions        = None
 
 
-def init_router(source_registry, tool_registry):
-    global _source_registry, _tool_registry
+def init_router(source_registry, tool_registry, sessions=None):
+    global _source_registry, _tool_registry, _sessions
     _source_registry = source_registry
     _tool_registry   = tool_registry
+    _sessions        = sessions
 
 
 def _reload_source(config: dict) -> None:
@@ -476,58 +478,85 @@ async def setup_status():
 
 @router.post("/reset")
 async def setup_reset():
-    """Delete all source configs, schema data, and knowledge. Keeps AI config."""
+    """
+    Full company reset — deletes all source configs, schema data, knowledge,
+    logs, and legacy prompt files. Keeps data/config/app.json (AI provider)
+    and data/config/.secret (encryption key).
+    """
     import shutil
+    from app.config import DATA_DIR, LOGS_DIR
 
     errors = []
 
-    # Delete all source config files
+    def _try_delete(path):
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        except Exception as e:
+            errors.append(f"{path}: {e}")
+
+    # 1. Delete all source config JSONs
     if SOURCES_CONFIG_DIR.exists():
         for f in SOURCES_CONFIG_DIR.glob("*.json"):
-            try:
-                f.unlink()
-            except Exception as e:
-                errors.append(str(e))
+            _try_delete(f)
 
-    # Delete all source schema dirs
+    # 2. Delete all source schema dirs (data/sources/{name}/)
     if SOURCES_DATA_DIR.exists():
         for d in SOURCES_DATA_DIR.iterdir():
             if d.is_dir():
-                try:
-                    shutil.rmtree(d)
-                except Exception as e:
-                    errors.append(str(e))
+                _try_delete(d)
 
-    # Delete company knowledge
+    # 3. Delete company knowledge
     if COMPANY_MD_PATH.exists():
-        try:
-            COMPANY_MD_PATH.unlink()
-        except Exception as e:
-            errors.append(str(e))
+        _try_delete(COMPANY_MD_PATH)
 
-    # Delete security config
+    # 4. Truncate log files (keep the files, clear the content)
+    if LOGS_DIR.exists():
+        for log_path in LOGS_DIR.glob("*.jsonl"):
+            try:
+                log_path.write_text("", encoding="utf-8")
+            except Exception as e:
+                errors.append(f"{log_path}: {e}")
+
+    # 5. Delete security config
     if SECURITY_PATH.exists():
-        try:
-            SECURITY_PATH.unlink()
-        except Exception as e:
-            errors.append(str(e))
+        _try_delete(SECURITY_PATH)
 
-    # Clear in-memory registries
+    # 6. Delete legacy data/prompts/ contents (v1 schema files)
+    legacy_prompts = DATA_DIR / "prompts"
+    if legacy_prompts.exists() and legacy_prompts.is_dir():
+        for item in legacy_prompts.iterdir():
+            if item.name == ".gitkeep":
+                continue
+            _try_delete(item)
+
+    # 7. Clear in-memory SourceRegistry
     if _source_registry:
         for name in list(_source_registry.names()):
             try:
                 _source_registry.remove(name)
             except Exception:
                 pass
+
+    # 8. Clear in-memory ToolRegistry
     if _tool_registry:
         try:
             _tool_registry.clear()
         except Exception:
             pass
 
+    # 9. Clear all active sessions
+    if _sessions:
+        try:
+            _sessions.clear_all()
+        except Exception:
+            pass
+
     if errors:
-        logger.warning(f"Reset completed with errors: {errors}")
+        logger.warning(f"Reset completed with {len(errors)} error(s): {errors}")
     else:
-        logger.info("Reset complete — all source data cleared")
+        logger.info("Reset complete — all company data cleared, AI config kept")
 
     return safe_json({"success": True, "errors": errors})

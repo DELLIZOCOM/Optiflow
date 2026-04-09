@@ -155,11 +155,12 @@ class AIClient:
         self,
         messages: list[dict],
         system: str,
-        tools: list[dict],
+        tools: Optional[list[dict]] = None,
         max_tokens: int = 4096,
     ):
-        """Call Anthropic messages.create with tool definitions.
+        """Call Anthropic messages.create with optional tool definitions.
 
+        Pass tools=None or tools=[] to force a plain text response (no tool calls).
         Returns the full Anthropic response object.
         Raises RateLimitExhausted on 429, RuntimeError on other failures.
         """
@@ -184,14 +185,16 @@ class AIClient:
         import anthropic
 
         client = anthropic.AsyncAnthropic(api_key=api_key)
+        kwargs: dict = dict(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=messages,
+        )
+        if tools:
+            kwargs["tools"] = tools
         try:
-            return await client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                system=system,
-                messages=messages,
-                tools=tools,
-            )
+            return await client.messages.create(**kwargs)
         except anthropic.RateLimitError as exc:
             retry_after = 60
             try:

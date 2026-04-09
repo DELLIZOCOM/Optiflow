@@ -345,18 +345,49 @@ function sendFromInput() {
 }
 
 
+// ── Clear Chat ────────────────────────────────────────────────────────────────
+
+async function clearChat() {
+  if (busy) return;
+  const sid = currentSessionId;
+  if (sid) {
+    try {
+      await fetch(`/session/${sid}`, { method: 'DELETE' });
+    } catch (_) {}
+  }
+  sessionStorage.removeItem(_STORAGE_KEY);
+  sessionStorage.removeItem('agent_session_id');
+  currentSessionId = null;
+  chatArea.innerHTML = '';
+  addMessage(
+    "Chat cleared. Ask me anything about your data.",
+    'ai'
+  );
+  input.focus();
+}
+
+
 // ── Reset / New Company ───────────────────────────────────────────────────────
 
 async function resetData() {
-  if (!confirm('This will delete all connected sources and knowledge, and restart the setup wizard. Continue?')) return;
+  if (!confirm(
+    'This will remove all connected sources, schemas, and business context.\n\n' +
+    'Your AI provider settings will be kept.\n\n' +
+    'Continue?'
+  )) return;
+  const btn = document.getElementById('resetBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Resetting\u2026'; }
   try {
     const res = await fetch('/setup/reset', { method: 'POST' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.errors?.[0] || 'Reset failed');
     sessionStorage.removeItem(_STORAGE_KEY);
     sessionStorage.removeItem('agent_session_id');
     window.location.href = '/setup';
   } catch (err) {
     alert('Reset failed: ' + err.message);
+    if (btn) { btn.disabled = false; btn.innerHTML = '&#8635; New Company'; }
   }
 }
 

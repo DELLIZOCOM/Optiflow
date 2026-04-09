@@ -27,9 +27,6 @@ SECRET_PATH        = CONFIG_DIR / ".secret"
 APP_CONFIG_PATH    = CONFIG_DIR / "app.json"
 _LEGACY_AI_PATH    = CONFIG_DIR / "model_config.json"  # backward compat
 COMPANY_MD_PATH    = KNOWLEDGE_DIR / "company.md"
-SUGGESTED_Q_PATH   = KNOWLEDGE_DIR / "suggested_questions.json"
-AUDIT_LOG_PATH     = LOGS_DIR / "audit.jsonl"
-QUERIES_LOG_PATH   = LOGS_DIR / "queries.jsonl"
 SECURITY_PATH      = CONFIG_DIR / "security.json"
 
 

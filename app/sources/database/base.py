@@ -112,39 +112,57 @@ def _select_key_columns(columns: list, max_cols: int = 5) -> list:
 
 # ── Schema file helpers ───────────────────────────────────────────────────────
 
-def write_schema_index(tables_data: list, schema_dir: Path) -> None:
-    """Write schema_index.txt to schema_dir. One line per table."""
-    lines = []
+def write_schema_index(
+    tables_data: list,
+    schema_dir: Path,
+    source_name: str = "",
+    db_type: str = "",
+) -> None:
+    """Write schema_index.md to schema_dir — markdown table of all tables."""
+    heading = source_name or schema_dir.name
+    db_label = db_type.upper() if db_type else "SQL"
+    lines = [
+        f"# {heading} ({db_label})",
+        "",
+        "| Table | Description | Rows |",
+        "|-------|-------------|------|",
+    ]
     for t in tables_data:
         desc = _derive_table_description(t["name"], t["columns"])
-        key_cols = _select_key_columns(t["columns"])
-        key_str = ", ".join(key_cols) if key_cols else "—"
-        lines.append(
-            f"{t['name']} | {t['row_count']:,} rows | {desc} | Key columns: {key_str}"
-        )
+        lines.append(f"| {t['name']} | {desc} | {t['row_count']:,} |")
     schema_dir.mkdir(parents=True, exist_ok=True)
-    (schema_dir / "schema_index.txt").write_text("\n".join(lines), encoding="utf-8")
-    logger.info(f"Schema index written: {len(lines)} tables → {schema_dir}/schema_index.txt")
+    (schema_dir / "schema_index.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    logger.info(f"Schema index written: {len(tables_data)} tables → {schema_dir}/schema_index.md")
 
 
 def write_table_file(table: dict, tables_dir: Path) -> None:
-    """Write a per-table detail file to tables_dir/{TableName}.txt."""
+    """Write a per-table detail .md file to tables_dir/{TableName}.md."""
     tables_dir.mkdir(parents=True, exist_ok=True)
     safe_name = re.sub(r"[^\w\-]", "_", table["name"])
-    path = tables_dir / f"{safe_name}.txt"
+    path = tables_dir / f"{safe_name}.md"
+    categorical = table.get("categorical", {})
     lines = [
-        f"TABLE: {table['name']}",
-        f"Row count: {table['row_count']:,}",
-        f"Columns ({len(table['columns'])}):",
+        f"# {table['name']}",
+        "",
+        f"**Row count**: {table['row_count']:,}",
+        "",
+        "## Columns",
+        "",
+        "| Column | Type | Nullable | Sample Values |",
+        "|--------|------|----------|---------------|",
     ]
     for col in table["columns"]:
         null_str = "NULL" if col["nullable"] else "NOT NULL"
-        lines.append(f"  {col['name']:<35} {col['type']:<25} {null_str}")
-    if table.get("categorical"):
-        lines.append("Distinct values for key columns:")
-        for col_name, vals in table["categorical"].items():
-            lines.append(f"  {col_name}: {vals}")
-    path.write_text("\n".join(lines), encoding="utf-8")
+        samples = ""
+        if col["name"] in categorical:
+            vals = categorical[col["name"]]
+            if vals:
+                samples = ", ".join(
+                    f'"{v}"' if isinstance(v, str) else str(v)
+                    for v in vals[:5]
+                )
+        lines.append(f"| {col['name']} | {col['type']} | {null_str} | {samples} |")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 # ── DatabaseSource base ───────────────────────────────────────────────────────
@@ -183,31 +201,41 @@ class DatabaseSource:
     # ── Schema file reads ─────────────────────────────────────────────────────
 
     def get_table_index(self) -> str:
-        path = self._schema_dir / "schema_index.txt"
-        try:
-            return path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return ""
-        except Exception as exc:
-            logger.warning(f"[{self._name}] get_table_index failed: {exc}")
-            return ""
+        """Read schema_index.md (preferred) or fall back to schema_index.txt."""
+        for fname in ("schema_index.md", "schema_index.txt"):
+            path = self._schema_dir / fname
+            try:
+                return path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                continue
+            except Exception as exc:
+                logger.warning(f"[{self._name}] get_table_index({fname}) failed: {exc}")
+        return ""
 
     def get_compact_index(self) -> str:
         return self.get_table_index()
 
     def get_table_detail(self, table_name: str) -> Optional[str]:
+        """Read per-table .md file (preferred) or fall back to .txt."""
         tables_dir = self._schema_dir / "tables"
         if not tables_dir.is_dir():
             return None
         safe = re.sub(r"[^\w\-]", "_", table_name)
-        for fname in (f"{safe}.txt", f"{table_name}.txt"):
+        candidates = [
+            f"{safe}.md", f"{table_name}.md",
+            f"{safe}.txt", f"{table_name}.txt",
+        ]
+        for fname in candidates:
             p = tables_dir / fname
             if p.exists():
                 return p.read_text(encoding="utf-8")
+        # Case-insensitive fallback
         try:
-            target = table_name.lower() + ".txt"
+            target_md  = table_name.lower() + ".md"
+            target_txt = table_name.lower() + ".txt"
             for fname in os.listdir(tables_dir):
-                if fname.lower() == target:
+                fl = fname.lower()
+                if fl == target_md or fl == target_txt:
                     return (tables_dir / fname).read_text(encoding="utf-8")
         except Exception:
             pass
@@ -217,10 +245,15 @@ class DatabaseSource:
         tables_dir = self._schema_dir / "tables"
         if not tables_dir.is_dir():
             return []
-        return [p.stem for p in tables_dir.glob("*.txt")]
+        stems = {p.stem for p in tables_dir.glob("*.md")}
+        stems |= {p.stem for p in tables_dir.glob("*.txt")}
+        return sorted(stems)
 
     def schema_discovered(self) -> bool:
-        return (self._schema_dir / "schema_index.txt").exists()
+        return (
+            (self._schema_dir / "schema_index.md").exists()
+            or (self._schema_dir / "schema_index.txt").exists()
+        )
 
     # ── Subclass must implement ───────────────────────────────────────────────
 

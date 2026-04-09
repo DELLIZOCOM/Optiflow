@@ -57,28 +57,58 @@ def _format_table(rows: list[dict], max_rows: int = 100) -> tuple[str, int]:
     return f"{header}\n{sep}\n{body}{note}", count
 
 
+# ── Source resolver ───────────────────────────────────────────────────────────
+
+def _resolve_source(registry, source_name: str):
+    """
+    Return (source, error_string).
+
+    Resolution rules:
+      1. Exact match → use it.
+      2. No match + exactly one source registered → auto-route to it.
+      3. No match + multiple sources → return error listing available names.
+    """
+    source = registry.get(source_name)
+    if source:
+        return source, None
+
+    all_sources = registry.get_all()
+    if len(all_sources) == 1:
+        return all_sources[0], None
+
+    available = registry.names()
+    if not available:
+        return None, "No data sources are connected yet. Complete Setup → Add Data Source."
+    return None, (
+        f"Source '{source_name}' not found. "
+        f"Available sources: {available}. "
+        "Use one of these names in your tool calls."
+    )
+
+
 # ── Tool implementations ───────────────────────────────────────────────────────
 
 class ListTablesTool(BaseTool):
     name        = "list_tables"
     description = (
-        "List all tables in a connected data source with descriptions and row counts. "
-        "Use this FIRST to understand what data is available before writing any SQL. "
-        "Pass an optional filter keyword to narrow down by table name or description."
+        "List all tables with descriptions and row counts. "
+        "You usually don't need this — the Business Context in your prompt already describes all tables. "
+        "Only call this if the Business Context doesn't cover the tables you're looking for, "
+        "or if the user explicitly asks what tables exist."
     )
     parameters  = {
         "type": "object",
         "properties": {
             "source": {
                 "type": "string",
-                "description": "Name of the data source to list tables from (e.g. 'sales_db')",
+                "description": "Data source name. Omit if only one source is connected.",
             },
             "filter": {
                 "type": "string",
-                "description": "Optional keyword to filter by table name or description",
+                "description": "Optional keyword to filter results by table name or description",
             },
         },
-        "required": ["source"],
+        "required": [],
     }
 
     def __init__(self, source_registry):
@@ -88,24 +118,16 @@ class ListTablesTool(BaseTool):
         source_name = (input.get("source") or "").strip()
         filter_kw   = (input.get("filter") or "").lower().strip()
 
-        source = self._registry.get(source_name)
-        if not source:
-            available = self._registry.names()
-            return ToolResult(
-                tool_call_id="",
-                content=(
-                    f"Source '{source_name}' not found. "
-                    f"Available sources: {available}"
-                ),
-                is_error=True,
-            )
+        source, err = _resolve_source(self._registry, source_name)
+        if err:
+            return ToolResult(tool_call_id="", content=err, is_error=True)
 
         index = source.get_table_index()
         if not index:
             return ToolResult(
                 tool_call_id="",
                 content=(
-                    f"Schema index not found for source '{source_name}'. "
+                    f"Schema index not found for source '{source.name}'. "
                     "Run Setup → Add Source → Discover Schema to generate it."
                 ),
                 is_error=True,
@@ -116,9 +138,8 @@ class ListTablesTool(BaseTool):
             lines = [l for l in lines if filter_kw in l.lower()]
 
         header = (
-            f"Source: {source_name}  "
-            f"Database: {source.get_database_name()}  "
-            f"({source.get_db_type().upper()})\n\n"
+            f"Source: **{source.name}** — use this name in execute_sql and get_table_schema calls\n"
+            f"Database: {source.get_database_name()}  |  Type: {source.get_db_type().upper()}\n\n"
         )
         body = "\n".join(lines) if lines else "(no tables match filter)"
         return ToolResult(tool_call_id="", content=header + body)
@@ -127,25 +148,24 @@ class ListTablesTool(BaseTool):
 class GetTableSchemaTool(BaseTool):
     name        = "get_table_schema"
     description = (
-        "Get full schema details — columns, data types, nullability, and sample/enum values — "
-        "for one or more tables in a specific data source. "
-        "Always call this after list_tables before writing SQL to understand column names and types. "
-        "Request multiple tables at once when you need to understand join relationships."
+        "Get full column details — names, types, nullability, and sample values — "
+        "for one or more tables. Always call this before writing SQL. "
+        "Request ALL tables you need in a single call — never one table at a time."
     )
     parameters  = {
         "type": "object",
         "properties": {
             "source": {
                 "type": "string",
-                "description": "Name of the data source (e.g. 'sales_db')",
+                "description": "Data source name. Omit if only one source is connected.",
             },
             "tables": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "List of table names to retrieve schemas for",
+                "description": "Table names to retrieve schemas for. Pass all needed tables at once.",
             },
         },
-        "required": ["source", "tables"],
+        "required": ["tables"],
     }
 
     def __init__(self, source_registry):
@@ -155,14 +175,9 @@ class GetTableSchemaTool(BaseTool):
         source_name = (input.get("source") or "").strip()
         tables      = input.get("tables") or []
 
-        source = self._registry.get(source_name)
-        if not source:
-            available = self._registry.names()
-            return ToolResult(
-                tool_call_id="",
-                content=f"Source '{source_name}' not found. Available: {available}",
-                is_error=True,
-            )
+        source, err = _resolve_source(self._registry, source_name)
+        if err:
+            return ToolResult(tool_call_id="", content=err, is_error=True)
 
         if not tables:
             return ToolResult(tool_call_id="", content="No table names provided.", is_error=True)
@@ -192,20 +207,17 @@ class GetTableSchemaTool(BaseTool):
 class ExecuteSQLTool(BaseTool):
     name        = "execute_sql"
     description = (
-        "Execute a read-only SQL SELECT query against a specific data source and return results. "
-        "Only SELECT queries (and CTEs starting with WITH) are allowed — "
-        "any modification statement will be rejected immediately. "
-        "Rules: use explicit column names (no SELECT *); "
-        "use TOP/LIMIT to cap at 100 rows; always include ORDER BY for deterministic results. "
-        "If the query returns an error, read the error message carefully, "
-        "fix the SQL (check column names, table names, GROUP BY completeness), and retry."
+        "Execute a read-only SQL SELECT query and return results. "
+        "Only SELECT (and WITH…SELECT CTEs) are allowed — modifications are rejected. "
+        "Use explicit column names, TOP/LIMIT for row cap, and ORDER BY. "
+        "On error: read the message, fix the SQL, and retry."
     )
     parameters  = {
         "type": "object",
         "properties": {
             "source": {
                 "type": "string",
-                "description": "Name of the data source to query (e.g. 'sales_db')",
+                "description": "Data source name. Omit if only one source is connected.",
             },
             "sql": {
                 "type": "string",
@@ -213,15 +225,10 @@ class ExecuteSQLTool(BaseTool):
             },
             "explanation": {
                 "type": "string",
-                "description": "Brief description of what this query retrieves",
-            },
-            "tables_used": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Table names referenced in this query",
+                "description": "One-line description of what this query retrieves",
             },
         },
-        "required": ["source", "sql", "explanation"],
+        "required": ["sql", "explanation"],
     }
 
     def __init__(self, source_registry):
@@ -232,14 +239,9 @@ class ExecuteSQLTool(BaseTool):
         sql         = (input.get("sql") or "").strip()
         explanation = input.get("explanation", "")
 
-        source = self._registry.get(source_name)
-        if not source:
-            available = self._registry.names()
-            return ToolResult(
-                tool_call_id="",
-                content=f"Source '{source_name}' not found. Available: {available}",
-                is_error=True,
-            )
+        source, err = _resolve_source(self._registry, source_name)
+        if err:
+            return ToolResult(tool_call_id="", content=err, is_error=True)
 
         if not sql:
             return ToolResult(tool_call_id="", content="No SQL provided.", is_error=True)

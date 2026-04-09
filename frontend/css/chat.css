@@ -58,6 +58,27 @@
       margin-top: 2px;
     }
 
+    .header-right {
+      display: flex;
+      align-items: center;
+    }
+
+    #resetBtn {
+      background: transparent;
+      border: 1px solid #444;
+      color: #8a8fb5;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    #resetBtn:hover {
+      border-color: #e05c5c;
+      color: #e05c5c;
+    }
+
     /* ── Chat area ── */
     .chat-area {
       flex: 1;

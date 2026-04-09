@@ -33,7 +33,7 @@ from app.config import (
     load_ai_config, save_ai_config,
     load_source_configs, save_source_config,
     is_ai_configured, is_setup_complete,
-    COMPANY_MD_PATH, SOURCES_DATA_DIR, SECURITY_PATH,
+    COMPANY_MD_PATH, SOURCES_CONFIG_DIR, SOURCES_DATA_DIR, SECURITY_PATH,
 )
 from app.ai.client import test_connection as test_ai_connection, get_completion
 from app.utils.helpers import safe_json, sanitize_name
@@ -280,6 +280,23 @@ async def setup_discover_schema(request: Request):
         result = await asyncio.wait_for(
             loop.run_in_executor(None, _discover), timeout=300
         )
+        # Auto-save source config and register it so generate-company-draft works immediately
+        if result.get("success"):
+            config = {
+                "name":        source_name,
+                "type":        source_type,
+                "description": f"{database} on {server}",
+                "credentials": {
+                    "server": server, "database": database,
+                    "user": user, "password": password,
+                },
+                "schema_discovered": True,
+            }
+            try:
+                await loop.run_in_executor(None, save_source_config, config)
+                _reload_source(config)
+            except Exception as e:
+                logger.warning(f"Auto-save after discover-schema failed: {e}")
         return safe_json(result)
     except asyncio.TimeoutError:
         return safe_json({"success": False, "error": "Schema discovery timed out (>300s)."})
@@ -354,6 +371,18 @@ async def setup_generate_company_draft(request: Request):
             index = source.get_compact_index()
             if index:
                 schema_text += f"\n\n=== Source: {source.name} ({source.get_database_name()}) ===\n{index}"
+
+    # Fallback: scan data/sources/ for discovered schema files (e.g. right after discover-schema)
+    if not schema_text:
+        from app.config import SOURCES_DATA_DIR
+        if SOURCES_DATA_DIR.exists():
+            for source_dir in sorted(SOURCES_DATA_DIR.iterdir()):
+                if source_dir.is_dir():
+                    index_path = source_dir / "schema_index.txt"
+                    if index_path.exists():
+                        index = index_path.read_text(encoding="utf-8").strip()
+                        if index:
+                            schema_text += f"\n\n=== Source: {source_dir.name} ===\n{index}"
 
     if not schema_text:
         return safe_json({"success": False, "error": "No schema found. Discover schema first."})
@@ -441,3 +470,64 @@ async def setup_status():
         "source_count":     len(sources),
         "sources":          [{"name": s.get("name"), "type": s.get("type")} for s in sources],
     })
+
+
+# ── Reset ──────────────────────────────────────────────────────────────────────
+
+@router.post("/reset")
+async def setup_reset():
+    """Delete all source configs, schema data, and knowledge. Keeps AI config."""
+    import shutil
+
+    errors = []
+
+    # Delete all source config files
+    if SOURCES_CONFIG_DIR.exists():
+        for f in SOURCES_CONFIG_DIR.glob("*.json"):
+            try:
+                f.unlink()
+            except Exception as e:
+                errors.append(str(e))
+
+    # Delete all source schema dirs
+    if SOURCES_DATA_DIR.exists():
+        for d in SOURCES_DATA_DIR.iterdir():
+            if d.is_dir():
+                try:
+                    shutil.rmtree(d)
+                except Exception as e:
+                    errors.append(str(e))
+
+    # Delete company knowledge
+    if COMPANY_MD_PATH.exists():
+        try:
+            COMPANY_MD_PATH.unlink()
+        except Exception as e:
+            errors.append(str(e))
+
+    # Delete security config
+    if SECURITY_PATH.exists():
+        try:
+            SECURITY_PATH.unlink()
+        except Exception as e:
+            errors.append(str(e))
+
+    # Clear in-memory registries
+    if _source_registry:
+        for name in list(_source_registry.names()):
+            try:
+                _source_registry.remove(name)
+            except Exception:
+                pass
+    if _tool_registry:
+        try:
+            _tool_registry.clear()
+        except Exception:
+            pass
+
+    if errors:
+        logger.warning(f"Reset completed with errors: {errors}")
+    else:
+        logger.info("Reset complete — all source data cleared")
+
+    return safe_json({"success": True, "errors": errors})

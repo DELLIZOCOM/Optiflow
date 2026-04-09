@@ -345,6 +345,22 @@ function sendFromInput() {
 }
 
 
+// ── Reset / New Company ───────────────────────────────────────────────────────
+
+async function resetData() {
+  if (!confirm('This will delete all connected sources and knowledge, and restart the setup wizard. Continue?')) return;
+  try {
+    const res = await fetch('/setup/reset', { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    sessionStorage.removeItem(_STORAGE_KEY);
+    sessionStorage.removeItem('agent_session_id');
+    window.location.href = '/setup';
+  } catch (err) {
+    alert('Reset failed: ' + err.message);
+  }
+}
+
+
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 (function init() {

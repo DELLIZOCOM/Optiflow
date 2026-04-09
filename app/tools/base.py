@@ -46,6 +46,9 @@ class ToolRegistry:
         self._tools[tool.name] = tool
         logger.debug(f"ToolRegistry: registered '{tool.name}'")
 
+    def clear(self) -> None:
+        self._tools.clear()
+
     def get_api_definitions(self) -> list[dict]:
         """Return Anthropic-format tool definitions."""
         return [

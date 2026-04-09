@@ -1,0 +1,10 @@
+TABLE: Monthly_Target
+Row count: 44
+Columns (7):
+  ID                                  int                       NOT NULL
+  TargetAmount                        decimal                   NULL
+  AchievedAmount                      decimal                   NULL
+  CreatedDate                         datetime                  NULL
+  BacklogAmount                       decimal                   NULL
+  Department                          nvarchar(-1)              NULL
+  CurrentMonth                        date                      NULL

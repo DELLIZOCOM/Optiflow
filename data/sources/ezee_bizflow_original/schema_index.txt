@@ -1,0 +1,28 @@
+AMC_MASTER | 53 rows | Master reference data | Key columns: AmcID, ProjectCode, CustomerCode, PoNumber, AMC_Code
+AMC_PO_DETAILS | 0 rows | Business data table | Key columns: Item_Name, PO_Detail_ID, PO_No, HSN_Code, Amount
+AMC_PO_MASTER | 0 rows | Master reference data | Key columns: Project_Code, Project_Title, PO_Total_Amount, GST_Total_Amount, PO_ID
+AMC_QUOTATION_DETAILS | 27 rows | Project-related records | Key columns: Project_Code, Customer_Code, Total_Amount, AMC_Detail_ID, Quotation_No
+AMC_QUOTATION_MASTER | 21 rows | Master reference data | Key columns: Project_Code, Customer_Code, Project_Title, AMC_Quote_ID, Quotation_No
+CLIENT_MASTER | 127 rows | Customer and client data | Key columns: client_ID_PK, client_Tax_No, client_Default_Add_ID_FK, client_Code, state_code
+INVOICE_DETAILS | 147 rows | Order and invoice records | Key columns: Project_Code, State_Code, Inv_Project_Title, Total_Amount, Original_Total_Amount
+Monthly_Target | 44 rows | Target, budget, and forecast data | Key columns: ID, TargetAmount, AchievedAmount, CreatedDate, BacklogAmount
+NOTE_NOTIFICATIONS | 90 rows | Notifications and alerts | Key columns: Project_Code, ID, Note_Text, Task_Date, Task_Status
+OPERATIONS | 86 rows | Project-related records | Key columns: Project_Code, Customer_Code, Project_Title, ID, Status
+payment_information | 157 rows | Financial and payment records | Key columns: Project_Code, amount_received_date, payment_id, Invoice_No, bank_reference_no
+PERFORMANCE_EVALUATION | 1 rows | Business data table | Key columns: EvaluationID, DepartmentID, EvaluatorID, CreatedDate, UpdatedDate
+PERFORMANCE_SCORE | 30 rows | Business data table | Key columns: ScoreID, EvaluationID, EmployeeID, CategoryID
+PERFORMANCE_SETTINGS | 5 rows | Business data table | Key columns: Rating_ID, Rating_Validity_To, Rating_Name, Rating_Status, Rating_CreatedDate
+PIC_MASTER | 139 rows | Master reference data | Key columns: ID, ClientCode, Name, Status, CreatedDate
+PO_DETAILS | 144 rows | Business data table | Key columns: Item_Name, PO_Detail_ID, PO_No, HSN_Code, Amount
+PO_MASTER | 95 rows | Master reference data | Key columns: Project_Title, PO_Total_Amount, GST_Total_Amount, PO_ID, PO_No
+PRIMARY_SKILLS | 8 rows | Business data table | Key columns: Primary_Skill_ID, Skill_Code, Skill_Name
+ProSt | 298 rows | Project-related records | Key columns: Project_Code, State_Code, Project_Title, Project_Status, ID
+QUOTATION_DETAILS | 240 rows | Business data table | Key columns: trans_ID_PK, cliend_ID_PK, trans_QUOTATION_ID_FK, ID, QUOTATION_DATE
+QUOTATION_MASTER | 148 rows | Master reference data | Key columns: quotation_CLIENT_ID_FK, quotation_PROJECT_CODE, quotation_PROJECT_NAME, quotation_ID_PK, quotation_NUMBER
+SECONDARY_SKILLS | 17 rows | Business data table | Key columns: Secondary_Skill_ID, Skill_Code, Primary_Skill_ID, Skill_Name
+SKILL_MASTER | 0 rows | Master reference data | Key columns: ID, Parent_Skill_ID, Skill_Name
+SPL_AND_AMC_PROJECTS | 111 rows | Project records and tracking | Key columns: Project_Code, State_Code, Inv_Project_Title, Total_Amount, Original_Total_Amount
+SUB_SECONDARY_SKILLS | 53 rows | Business data table | Key columns: Sub_Secondary_Skill_ID, Skill_Code, Secondary_Skill_ID, Skill_Name
+TERMS_MASTER | 3 rows | Master reference data | Key columns: tc_ID, tc_Title, tc_Status, tc_CreatedDate, tc_UpdatedDate
+TICKET_DETAILS | 9 rows | Business data table | Key columns: ID, Ticket_ID, Last_Approval_Notify, Task_Title, Date_Of_Delivery
+USER_MASTER | 25 rows | Master reference data | Key columns: ID, Employee_ID, Username, FirstName, LastName

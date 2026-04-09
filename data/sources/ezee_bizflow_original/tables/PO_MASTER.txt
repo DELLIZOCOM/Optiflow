@@ -1,0 +1,14 @@
+TABLE: PO_MASTER
+Row count: 95
+Columns (9):
+  PO_ID                               int                       NOT NULL
+  PO_No                               varchar(50)               NOT NULL
+  PO_Date                             date                      NOT NULL
+  Project_Title                       varchar(255)              NULL
+  GSTIN_No                            varchar(50)               NULL
+  Customer_Address                    text(2147483647)          NULL
+  PO_Total_Amount                     decimal                   NULL
+  GST_Total_Amount                    decimal                   NULL
+  ConfirmationType                    varchar(20)               NULL
+Distinct values for key columns:
+  ConfirmationType: ['Email', 'PO', 'Verbal']

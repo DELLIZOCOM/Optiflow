@@ -275,3 +275,10 @@ To connect to a different database or change the AI provider without reinstallin
 | `cryptography` | Fernet encryption for secrets |
 | `requests` | HTTP calls (Ollama connection test) |
 | `python-multipart` | Form parsing for FastAPI |
+
+
+cd /Users/vinayakajith/Desktop/optiflow-ai
+python -m venv .venv          # only needed once
+source .venv/bin/activate
+pip install -r requirements.txt   # only needed once
+uvicorn backend.app:app --host 0.0.0.0 

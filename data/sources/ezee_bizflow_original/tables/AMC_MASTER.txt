@@ -1,0 +1,36 @@
+TABLE: AMC_MASTER
+Row count: 53
+Columns (27):
+  AmcID                               int                       NOT NULL
+  ProjectCode                         nvarchar(5)               NULL
+  CustomerCode                        nvarchar(10)              NULL
+  CustomerName                        nvarchar(200)             NULL
+  ProjectTitle                        nvarchar(200)             NULL
+  Description                         nvarchar(-1)              NULL
+  Rate                                decimal                   NULL
+  Quantity                            decimal                   NULL
+  TotalAmount                         decimal                   NULL
+  PoNumber                            nvarchar(50)              NULL
+  PoDate                              date                      NULL
+  AMCCoverage                         nvarchar(20)              NULL
+  AMCStartDate                        date                      NULL
+  AMCEndDate                          date                      NULL
+  AMCCharges                          decimal                   NULL
+  WarrantyStartDate                   date                      NULL
+  WarrantyEndDate                     date                      NULL
+  Status                              varchar(100)              NULL
+  CreatedAt                           datetime                  NULL
+  AttachmentName                      nvarchar(255)             NULL
+  AttachmentFile                      varbinary(-1)             NULL
+  CoverageEnd                         date                      NULL
+  AMC_Code                            nvarchar(5)               NULL
+  AMC_Amount                          decimal                   NULL
+  Payment_Status                      varchar(20)               NULL
+  Quotation_No                        nvarchar(-1)              NULL
+  Po_Filename                         nvarchar(-1)              NULL
+Distinct values for key columns:
+  PoNumber: ['', '4501854699', 'PO : 01125614', 'There is no Purchase Order']
+  AMCCoverage: ['', '6']
+  Status: ['Active', 'Awaiting PO', 'Under AMC', 'Work In Progress']
+  AMC_Code: []
+  Payment_Status: ['Received']

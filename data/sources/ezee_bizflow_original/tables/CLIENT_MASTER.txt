@@ -1,0 +1,32 @@
+TABLE: CLIENT_MASTER
+Row count: 127
+Columns (21):
+  client_ID_PK                        int                       NOT NULL
+  client_Name                         nvarchar(200)             NOT NULL
+  client_URL                          nvarchar(200)             NULL
+  client_Logo                         nvarchar(250)             NULL
+  client_PAN                          nvarchar(10)              NULL
+  client_TAN                          nvarchar(13)              NULL
+  client_CIN                          nvarchar(21)              NULL
+  client_TIN                          nvarchar(13)              NULL
+  client_GSTIN                        nvarchar(15)              NULL
+  client_Tax_No                       nvarchar(6)               NULL
+  client_Default_Add_ID_FK            int                       NULL
+  client_Code                         nvarchar(8)               NOT NULL
+  client_Status                       bit                       NOT NULL
+  client_Address1                     nvarchar(-1)              NULL
+  client_Address2                     nvarchar(-1)              NULL
+  client_Address3                     nvarchar(-1)              NULL
+  client_District                     nvarchar(-1)              NULL
+  client_Pincode                      int                       NULL
+  state_code                          int                       NULL
+  client_Country                      varchar(50)               NULL
+  client_State                        varchar(50)               NULL
+Distinct values for key columns:
+  client_PAN: ['', 'AAACT9025D', 'AACCS3003L']
+  client_TAN: []
+  client_CIN: []
+  client_TIN: []
+  client_Tax_No: []
+  client_Country: ['India']
+  client_State: ['Andhra Pradesh', 'Gujarat', 'Karnataka', 'Kerala', 'Maharashtra', 'Rajasthan', 'Tamil Nadu']

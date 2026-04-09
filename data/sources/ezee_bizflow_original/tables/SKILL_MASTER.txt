@@ -1,0 +1,10 @@
+TABLE: SKILL_MASTER
+Row count: 0
+Columns (5):
+  ID                                  int                       NOT NULL
+  Skill_Name                          nvarchar(150)             NOT NULL
+  Parent_Skill_ID                     int                       NULL
+  Created_By                          nvarchar(100)             NULL
+  Created_At                          datetime                  NULL
+Distinct values for key columns:
+  Created_By: []

@@ -1,0 +1,13 @@
+TABLE: PERFORMANCE_EVALUATION
+Row count: 1
+Columns (10):
+  EvaluationID                        bigint                    NOT NULL
+  DepartmentID                        bigint                    NOT NULL
+  Month                               int                       NOT NULL
+  Year                                int                       NOT NULL
+  EvaluatorID                         nvarchar(150)             NOT NULL
+  CreatedDate                         datetime                  NULL
+  UpdatedDate                         datetime                  NULL
+  CreatedBy                           nvarchar(150)             NOT NULL
+  UpdatedBy                           nvarchar(150)             NULL
+  Status                              int                       NULL

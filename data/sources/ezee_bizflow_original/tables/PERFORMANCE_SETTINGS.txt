@@ -1,0 +1,20 @@
+TABLE: PERFORMANCE_SETTINGS
+Row count: 5
+Columns (14):
+  Rating_ID                           bigint                    NOT NULL
+  Rating_Name                         varchar(64)               NOT NULL
+  Rating_Category                     varchar(64)               NOT NULL
+  Rating_Parent                       bigint                    NOT NULL
+  Rating_Min                          bigint                    NOT NULL
+  Rating_Max                          bigint                    NOT NULL
+  Rating_Effective_From               date                      NOT NULL
+  Rating_Validity_To                  date                      NULL
+  Rating_Comments                     varchar(-1)               NULL
+  Rating_Status                       bit                       NOT NULL
+  Rating_CreatedDate                  datetime                  NOT NULL
+  Rating_UpdatedDate                  datetime                  NULL
+  Rating_CreatedBy                    int                       NOT NULL
+  Rating_UpdatedBy                    int                       NULL
+Distinct values for key columns:
+  Rating_Name: ['Star 1', 'Star 2', 'Star 3', 'Star 4', 'Star 5']
+  Rating_Category: ['Belonginess & Ownership', 'Delivery', 'HR (Attitude & Attendance)', 'Quality of Delivery', 'Revenue & Business Impact']

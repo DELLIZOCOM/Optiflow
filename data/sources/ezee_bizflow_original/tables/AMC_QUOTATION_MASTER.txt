@@ -1,0 +1,15 @@
+TABLE: AMC_QUOTATION_MASTER
+Row count: 21
+Columns (8):
+  AMC_Quote_ID                        int                       NOT NULL
+  Quotation_No                        nvarchar(50)              NOT NULL
+  Project_Code                        nvarchar(50)              NOT NULL
+  Customer_Code                       nvarchar(50)              NOT NULL
+  Project_Title                       nvarchar(300)             NULL
+  Terms                               nvarchar(-1)              NULL
+  Quotation_Date                      date                      NOT NULL
+  Created_At                          datetime                  NOT NULL
+Distinct values for key columns:
+  Quotation_No: ['ECZAPT2526A063', 'ECZBUN(P)2526A064', 'ECZFAU2526A069', 'ECZGLV2526A074', 'ECZHNT2526A072', 'ECZHNT2526A073', 'ECZHSL(AP)2627A002', 'ECZHTI2526A070', 'ECZKSH2526A055', 'ECZKSP2526A001', 'ECZKSP2526A057', 'ECZLSA2526A058', 'ECZPHA2526A068', 'ECZSHN2526A067', 'ECZSLL2526A066', 'ECZSSP2627A001', 'ECZTHR(P)2526A061', 'ECZTHR2526A059', 'ECZVID2526A056', 'ECZYSI2526A062', 'ECZYSI2526A065']
+  Project_Code: ['0', '001', '002', '033', '046', '083', '128', '129', '248', '508', '626', '661', 'A007', 'A055', 'A056', 'A057', 'A058', 'OA65', 'OA67']
+  Customer_Code: ['APT', 'BUN(P)', 'FAU', 'GLV', 'HNT', 'HSL(AP)', 'HTI', 'KSH', 'KSP', 'LSA', 'PHA', 'SHN', 'SLL', 'SSP', 'THR', 'THR(P)', 'VID', 'YSI']

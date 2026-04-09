@@ -1,0 +1,53 @@
+TABLE: SPL_AND_AMC_PROJECTS
+Row count: 111
+Columns (42):
+  Detail_ID                           int                       NOT NULL
+  Invoice_No                          varchar(50)               NULL
+  Inv_Description                     nvarchar(-1)              NULL
+  Rate                                decimal                   NULL
+  Quantity                            int                       NULL
+  Total_Amount                        decimal                   NULL
+  IsInvoiced                          bit                       NULL
+  Project_Code                        varchar(50)               NULL
+  Line_Status                         varchar(50)               NULL
+  Invoice_CreatedAt                   datetime                  NULL
+  GST_Type                            nvarchar(10)              NULL
+  CGST_Amount                         decimal                   NULL
+  SGST_Amount                         decimal                   NULL
+  IGST_Amount                         decimal                   NULL
+  Grand_Total                         decimal                   NULL
+  GSTIN                               nvarchar(50)              NULL
+  Inv_Project_Title                   nvarchar(200)             NULL
+  State_Code                          nvarchar(10)              NULL
+  Original_Total_Amount               decimal                   NULL
+  HSN_Code                            varchar(50)               NULL
+  Customer                            nvarchar(-1)              NULL
+  CreatedAt                           datetime                  NULL
+  AMC_Coverage                        date                      NULL
+  AMC_Percentage                      nvarchar(20)              NULL
+  StartPeriod                         date                      NULL
+  EndPeriod                           date                      NULL
+  sh_copy                             nvarchar(3)               NULL
+  recipient_name                      nvarchar(-1)              NULL
+  acknowledged_date                   date                      NULL
+  acknowledgement_type                nvarchar(-1)              NULL
+  remainder_status                    nvarchar(-1)              NULL
+  remainder_date                      nvarchar(-1)              NULL
+  Remarks                             nvarchar(-1)              NULL
+  Approve_Timestamp                   datetime                  NULL
+  Inv_Comment                         nvarchar(-1)              NULL
+  EWOP                                varchar(10)               NULL
+  EDOP                                varchar(500)              NULL
+  TAT_Pending                         int                       NULL
+  TAT_Review                          int                       NULL
+  TAT_Invoiced                        int                       NULL
+  TAT_Payments_Closed                 int                       NULL
+  PaymentsClosed_At                   datetime                  NULL
+Distinct values for key columns:
+  Line_Status: ['Invoiced', 'Payments Closed', 'Pending', 'Under Review']
+  GST_Type: ['CGST', 'IGST', 'NA']
+  State_Code: ['06', '24', '27', '29', '33', '37']
+  HSN_Code: ['998216', '998314', '998346']
+  AMC_Percentage: []
+  sh_copy: ['0,0', '1,0', '1,1']
+  EWOP: ['11 of 2026', '14 of 2026', '15 of 2026', '6 of 2026', '8 of 2026', '9 of 2026']

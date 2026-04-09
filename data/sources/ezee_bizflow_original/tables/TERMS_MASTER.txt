@@ -1,0 +1,11 @@
+TABLE: TERMS_MASTER
+Row count: 3
+Columns (8):
+  tc_ID                               int                       NOT NULL
+  tc_Title                            nvarchar(255)             NOT NULL
+  tc_HtmlBody                         nvarchar(-1)              NOT NULL
+  tc_Status                           tinyint                   NOT NULL
+  tc_CreatedDate                      datetime                  NULL
+  tc_UpdatedDate                      datetime                  NULL
+  tc_software                         nvarchar(-1)              NULL
+  tc_hardware                         nvarchar(-1)              NULL

@@ -261,7 +261,7 @@ async function sendQuestion(question) {
 
   try {
     await _readSSE(
-      '/agent/ask',
+      '/ask',
       { question, session_id: currentSessionId },
       (event) => {
         switch (event.type) {

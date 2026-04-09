@@ -1,0 +1,13 @@
+{
+  "cloud_provider": {
+    "provider": "anthropic",
+    "api_key": "gAAAAABp1zl-HtNjUq3oTVYYVpqBn8EoQbgU2xa7FMBJfsdD9ZMzNKw_G8TPk7kJbrVGHb7Y1VbXSgKjkGfIePvH_bIglqXlUvEsSbkqLAraPZGOj0FbI3B4lOiyROvAa9Xv_B2F-yLqbrTe2sPh6kayyK2hKAt_w68NNoSetgeOUZQUR1xl9cIYJnanCvQ1jQp7vMMLTvTmM8MMVXHrHLGsWAFAnM4JXg==",
+    "api_key_hint": "_gAA",
+    "model": "claude-sonnet-4-20250514"
+  },
+  "local_provider": {
+    "enabled": false,
+    "endpoint": "http://localhost:11434",
+    "model": "qwen3:8b"
+  }
+}

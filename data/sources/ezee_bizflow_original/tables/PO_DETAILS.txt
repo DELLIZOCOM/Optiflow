@@ -1,0 +1,19 @@
+TABLE: PO_DETAILS
+Row count: 144
+Columns (13):
+  PO_Detail_ID                        int                       NOT NULL
+  PO_No                               varchar(50)               NOT NULL
+  Item_Name                           nvarchar(-1)              NULL
+  Rate                                decimal                   NULL
+  Quantity                            int                       NULL
+  Amount                              decimal                   NULL
+  CGST                                decimal                   NULL
+  SGST                                decimal                   NULL
+  IGST                                decimal                   NULL
+  Advance                             int                       NULL
+  HSN_Code                            varchar(50)               NULL
+  AMC_Coverage                        date                      NULL
+  AMC_Percentage                      nvarchar(20)              NULL
+Distinct values for key columns:
+  HSN_Code: ['', '0', '998314']
+  AMC_Percentage: []

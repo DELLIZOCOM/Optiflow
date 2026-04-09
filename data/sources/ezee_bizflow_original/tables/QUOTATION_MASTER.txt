@@ -1,0 +1,22 @@
+TABLE: QUOTATION_MASTER
+Row count: 148
+Columns (19):
+  quotation_ID_PK                     int                       NOT NULL
+  quotation_NUMBER                    nvarchar(100)             NOT NULL
+  quotation_DATE                      date                      NOT NULL
+  quotation_CLIENT_ID_FK              nvarchar(50)              NOT NULL
+  quotation_PROJECT_CODE              char(10)                  NULL
+  quotation_PROJECT_NAME              nvarchar(350)             NULL
+  quotation_ADDRESS_ID_FK             int                       NULL
+  quotation_TOTAL_QTY                 float                     NULL
+  quotation_RATE                      float                     NULL
+  quotation_GRAND_TOTAL               float                     NULL
+  quotation_REVISED_TOTAL             float                     NULL
+  quotation_DISCOUNT_AMOUNT           float                     NULL
+  quotation_SUBJECT                   nvarchar(350)             NULL
+  quotation_REMARKS                   nvarchar(-1)              NULL
+  quotation_TERMS                     text(2147483647)          NULL
+  quotation_STATUS                    bit                       NULL
+  quotation_CANCEL_REMARKS            nvarchar(500)             NULL
+  quotation_ANNEXURE                  nvarchar(-1)              NULL
+  quotation_FILENAME                  nvarchar(255)             NULL

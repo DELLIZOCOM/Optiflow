@@ -13,6 +13,7 @@ Tools:
 """
 
 import logging
+import json
 import re
 
 from app.tools.base import BaseTool, ToolResult
@@ -26,10 +27,10 @@ _SELECT_RE = re.compile(
 )
 
 
-def _format_table(rows: list[dict], max_rows: int = 100) -> tuple[str, int]:
-    """Format list-of-dicts as a readable text table. Returns (text, row_count)."""
+def _format_table(rows: list[dict], max_rows: int = 100) -> tuple[str, int, list[str]]:
+    """Format list-of-dicts as a readable text table. Returns (text, row_count, columns)."""
     if not rows:
-        return "Query returned 0 rows.", 0
+        return "Query returned 0 rows.", 0, []
 
     display = rows[:max_rows]
     cols    = list(display[0].keys())
@@ -54,7 +55,25 @@ def _format_table(rows: list[dict], max_rows: int = 100) -> tuple[str, int]:
     if count > max_rows:
         note += f" — showing first {max_rows}"
 
-    return f"{header}\n{sep}\n{body}{note}", count
+    return f"{header}\n{sep}\n{body}{note}", count, cols
+
+
+def _build_structured_result(rows: list[dict], max_preview: int = 20) -> dict:
+    if not rows:
+        return {
+            "row_count": 0,
+            "columns": [],
+            "preview_rows": [],
+            "sample_row": None,
+        }
+
+    preview = rows[:max_preview]
+    return {
+        "row_count": len(rows),
+        "columns": list(preview[0].keys()),
+        "preview_rows": preview,
+        "sample_row": preview[0],
+    }
 
 
 # ── Source resolver ───────────────────────────────────────────────────────────
@@ -210,7 +229,8 @@ class ExecuteSQLTool(BaseTool):
         "Execute a read-only SQL SELECT query and return results. "
         "Only SELECT (and WITH…SELECT CTEs) are allowed — modifications are rejected. "
         "Use explicit column names, TOP/LIMIT for row cap, and ORDER BY. "
-        "On error: read the message, fix the SQL, and retry."
+        "On error: read the message, fix the SQL, and retry. "
+        "The result includes a readable table plus structured JSON metadata for reliable reasoning."
     )
     parameters  = {
         "type": "object",
@@ -261,11 +281,23 @@ class ExecuteSQLTool(BaseTool):
 
         try:
             rows = await source.execute_query(sql)
-            text, row_count = _format_table(rows)
+            text, row_count, columns = _format_table(rows)
+            structured = _build_structured_result(rows)
+            content = (
+                "RESULT PREVIEW\n"
+                f"{text}\n\n"
+                "RESULT JSON\n"
+                f"{json.dumps(structured, default=str, ensure_ascii=False)}"
+            )
             return ToolResult(
                 tool_call_id="",
-                content=text,
-                metadata={"row_count": row_count, "explanation": explanation},
+                content=content,
+                metadata={
+                    "row_count": row_count,
+                    "columns": columns,
+                    "explanation": explanation,
+                    "structured": structured,
+                },
             )
         except Exception as exc:
             err = str(exc)

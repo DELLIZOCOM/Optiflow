@@ -24,6 +24,8 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import AsyncGenerator, Optional
 
 logger = logging.getLogger(__name__)
@@ -115,6 +117,14 @@ class AgentOrchestrator:
         from app.config import COMPANY_MD_PATH
 
         prompt = SYSTEM_PROMPT
+        now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+        prompt += (
+            "\n\n## Runtime Context\n\n"
+            f"Today is `{now_ist.strftime('%Y-%m-%d')}`.\n"
+            f"Current local datetime is `{now_ist.strftime('%Y-%m-%d %H:%M:%S %Z')}`.\n"
+            "Interpret relative dates such as today, yesterday, this month, last 7 days, "
+            "and last 10 days using this date and timezone unless the user specifies otherwise."
+        )
 
         # Inject connected source names so the agent never has to guess
         sources = self._sources.get_all()
@@ -126,11 +136,18 @@ class AgentOrchestrator:
                 f"Database: {s.get_database_name()}\n"
                 f"Use `{s.name}` as the `source` value in any tool call that asks for it."
             )
+            section = s.get_system_prompt_section().strip()
+            if section:
+                prompt += f"\n\n{section}"
         elif len(sources) > 1:
             prompt += "\n\n## Connected Databases\n\n"
             for s in sources:
                 prompt += f"- `{s.name}` ({s.get_db_type().upper()}, db: {s.get_database_name()})\n"
             prompt += "\nSpecify the correct `source` name in every tool call."
+            for s in sources:
+                section = s.get_system_prompt_section().strip()
+                if section:
+                    prompt += f"\n\n### Dialect Notes For `{s.name}`\n{section}"
 
         # Append company knowledge — the agent's domain map
         try:
@@ -210,8 +227,8 @@ class AgentOrchestrator:
                 if elapsed < 0.2:
                     await asyncio.sleep(0.2 - elapsed)
 
-                # ── On the penultimate iteration, remove tools to force answer ─
-                force_final = (iteration >= self._max_iter - 1)
+                # ── Two iterations before limit, remove tools to force answer ─
+                force_final = (iteration >= self._max_iter - 2)
                 call_tools  = None if force_final else self._registry.get_api_definitions()
                 if force_final:
                     logger.info("[Agent] Forcing final answer — tools disabled")

@@ -344,15 +344,41 @@ async def setup_save_source(request: Request):
 # ── Step 3: Business Context ───────────────────────────────────────────────────
 
 _COMPANY_DRAFT_SYSTEM = """\
-You are a business analyst. Given a database schema, write a comprehensive company.md \
-knowledge document that describes:
-1. What the company does (inferred from table names and columns)
-2. Each table: purpose, when to use it, key relationships
-3. Important business terminology and status codes found in the data
-4. How different entities relate (e.g. customers → orders → invoices)
+You are a product-quality business analyst writing a company-agnostic knowledge document \
+for an autonomous SQL agent. Use only the supplied schema evidence.
 
-Format with ## headings per table. Be specific about column meanings.
-Write in plain English. This document will be used by an AI agent to answer business questions."""
+Your output must help an AI agent choose the right tables and avoid mixing unrelated business events.
+
+Write a `company.md` document with these sections:
+1. `# Company Knowledge Document`
+2. `## Company Overview`
+   - infer cautiously from schema only
+   - clearly say when something is inferred rather than confirmed
+3. `## Analytical Guardrails`
+   - explain which tables represent distinct business events such as customers, projects, quotations, purchase orders, invoices, payments, tickets, employees, etc.
+   - explicitly warn when similar tables should NOT be merged into one metric without user intent
+   - call out likely source-of-truth tables for common questions when the schema makes that reasonable
+4. `## Table Guide`
+   For each important table, include:
+   - Purpose
+   - Grain (one row represents what)
+   - When to use
+   - Key columns
+   - Important date columns
+   - Important amount / status columns
+   - Likely joins and caveats
+5. `## Business Process Flow`
+6. `## Ambiguities / Needs Confirmation`
+   - list assumptions the user should verify
+
+Rules:
+- Be company-agnostic and evidence-based.
+- Do not invent status meanings unless sample values make them obvious.
+- Distinguish header tables from line-item tables.
+- Distinguish project creation from operations, invoicing, and payments.
+- If multiple finance tables exist, explain how they differ.
+- Prefer concise, high-signal bullets over generic prose.
+- This file is for an AI agent, so precision matters more than polish."""
 
 _COMPANY_FOLLOWUP_SYSTEM = """\
 You are a business analyst reviewing a knowledge document. \
@@ -361,30 +387,56 @@ Return ONLY a JSON array of strings, no other text. \
 Example: ["What does Status='Pending' mean in INVOICE_DETAILS?", ...]"""
 
 
+def _collect_schema_context() -> str:
+    chunks: list[str] = []
+    if _source_registry:
+        for source in _source_registry.get_all():
+            lines = [
+                f"=== Source: {source.name} ({source.get_db_type().upper()}, db: {source.get_database_name()}) ==="
+            ]
+            index = source.get_compact_index().strip()
+            if index:
+                lines.append("## Schema Index")
+                lines.append(index)
+
+            available = source.get_available_tables()[:12]
+            if available:
+                lines.append("## Detailed Table Files")
+            for table_name in available:
+                detail = source.get_table_detail(table_name)
+                if detail:
+                    lines.append(detail[:4000])
+            chunks.append("\n\n".join(lines))
+
+    if chunks:
+        return "\n\n".join(chunks)
+
+    if SOURCES_DATA_DIR.exists():
+        for source_dir in sorted(SOURCES_DATA_DIR.iterdir()):
+            if not source_dir.is_dir():
+                continue
+            lines = [f"=== Source: {source_dir.name} ==="]
+            for index_name in ("schema_index.md", "schema_index.txt"):
+                index_path = source_dir / index_name
+                if index_path.exists():
+                    lines.append("## Schema Index")
+                    lines.append(index_path.read_text(encoding="utf-8").strip())
+                    break
+            tables_dir = source_dir / "tables"
+            if tables_dir.is_dir():
+                lines.append("## Detailed Table Files")
+                for path in sorted(list(tables_dir.glob("*.md"))[:12]):
+                    lines.append(path.read_text(encoding="utf-8")[:4000])
+            chunks.append("\n\n".join(lines))
+    return "\n\n".join(chunks)
+
+
 @router.post("/generate-company-draft")
 async def setup_generate_company_draft(request: Request):
     body    = await request.json()
     db_name = body.get("db_name", "the database")
 
-    # Collect schema from all connected sources
-    schema_text = ""
-    if _source_registry:
-        for source in _source_registry.get_all():
-            index = source.get_compact_index()
-            if index:
-                schema_text += f"\n\n=== Source: {source.name} ({source.get_database_name()}) ===\n{index}"
-
-    # Fallback: scan data/sources/ for discovered schema files (e.g. right after discover-schema)
-    if not schema_text:
-        from app.config import SOURCES_DATA_DIR
-        if SOURCES_DATA_DIR.exists():
-            for source_dir in sorted(SOURCES_DATA_DIR.iterdir()):
-                if source_dir.is_dir():
-                    index_path = source_dir / "schema_index.txt"
-                    if index_path.exists():
-                        index = index_path.read_text(encoding="utf-8").strip()
-                        if index:
-                            schema_text += f"\n\n=== Source: {source_dir.name} ===\n{index}"
+    schema_text = _collect_schema_context()
 
     if not schema_text:
         return safe_json({"success": False, "error": "No schema found. Discover schema first."})
@@ -395,7 +447,11 @@ async def setup_generate_company_draft(request: Request):
         def _generate():
             return get_completion(
                 system=_COMPANY_DRAFT_SYSTEM,
-                user=f"Database name: {db_name}\n{schema_text}",
+                user=(
+                    f"Database name: {db_name}\n\n"
+                    "Write a high-signal company knowledge document from this schema package.\n\n"
+                    f"{schema_text}"
+                ),
                 max_tokens=4000,
                 temperature=0,
             )

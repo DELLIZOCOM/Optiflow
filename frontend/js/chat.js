@@ -4,9 +4,10 @@ const chatArea = document.getElementById('chatArea');
 const input    = document.getElementById('questionInput');
 const sendBtn  = document.getElementById('sendBtn');
 
-let busy            = false;
-let traceCounter    = 0;
+let busy             = false;
+let traceCounter     = 0;
 let currentSessionId = sessionStorage.getItem('agent_session_id') || null;
+let _activeAbort     = null;   // AbortController for the in-flight SSE request
 
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -19,7 +20,7 @@ function escHtml(str) {
 }
 
 function setDisabled(disabled) {
-  busy = disabled;
+  busy             = disabled;
   sendBtn.disabled = disabled;
   input.disabled   = disabled;
 }
@@ -73,12 +74,12 @@ function createTracePanel() {
   const panel = document.createElement('div');
   panel.className = 'trace-panel';
   panel.id        = id;
-  panel.innerHTML = `
-    <div class="trace-header" id="${id}-header">
-      <span class="trace-dots"><span></span><span></span><span></span></span>
-      <span class="trace-title" id="${id}-title">Agent working\u2026</span>
-    </div>
-    <div class="trace-body" id="${id}-body"></div>`;
+  panel.innerHTML =
+    '<div class="trace-header">' +
+      '<span class="trace-dots"><span></span><span></span><span></span></span>' +
+      '<span class="trace-title">Agent working\u2026</span>' +
+    '</div>' +
+    '<div class="trace-body"></div>';
   chatArea.appendChild(panel);
   scrollBottom();
   return panel;
@@ -91,44 +92,80 @@ function updateTraceStatus(panel, message) {
 
 function appendThinkingStep(panel, content) {
   const body = panel.querySelector('.trace-body');
+  if (!body) return;
   const step = document.createElement('div');
   step.className = 'trace-step trace-thinking';
-  step.innerHTML =
-    `<span class="trace-icon">\uD83E\uDDE0</span>` +
-    `<span class="trace-text">${escHtml(content)}</span>`;
+  const icon = document.createElement('span');
+  icon.className = 'trace-icon';
+  icon.textContent = '\uD83E\uDDE0';
+  const text = document.createElement('span');
+  text.className = 'trace-text';
+  text.textContent = content;
+  step.appendChild(icon);
+  step.appendChild(text);
   body.appendChild(step);
   scrollBottom();
 }
 
 function appendToolCallStep(panel, tool, toolInput) {
   const body = panel.querySelector('.trace-body');
+  if (!body) return null;
+
   const step = document.createElement('div');
   step.className = 'trace-step trace-tool';
 
-  let icon  = '\uD83D\uDD27';   // 🔧
-  let label = `<strong>${escHtml(tool)}</strong>`;
-  let extra = '';
+  let iconText  = '\uD83D\uDD27'; // 🔧
+  let labelText = tool;
+  let sqlText   = null;
 
-  if (tool === 'execute_sql') {
-    icon  = '\u26A1';           // ⚡
-    label = '<strong>execute_sql</strong>';
-    if (toolInput && toolInput.sql) {
-      extra = `<pre class="trace-sql">${escHtml(toolInput.sql)}</pre>`;
-    }
-  } else if (tool === 'get_table_schema' && toolInput && toolInput.tables) {
-    const names = Array.isArray(toolInput.tables) ? toolInput.tables.join(', ') : toolInput.tables;
-    label = `<strong>get_table_schema</strong> <span class="trace-tool-args">(${escHtml(names)})</span>`;
-  } else if (tool === 'list_tables' && toolInput && toolInput.filter) {
-    label = `<strong>list_tables</strong> <span class="trace-tool-args">filter: ${escHtml(toolInput.filter)}</span>`;
-  } else if (tool === 'get_business_context' && toolInput && toolInput.topic) {
-    label = `<strong>get_business_context</strong> <span class="trace-tool-args">${escHtml(toolInput.topic)}</span>`;
+  if (tool === 'list_tables') {
+    iconText  = '\uD83D\uDCCB'; // 📋
+    labelText = 'Orienting to database\u2026';
+  } else if (tool === 'get_table_schema') {
+    iconText = '\uD83D\uDCC4'; // 📄
+    const names = toolInput && toolInput.tables
+      ? (Array.isArray(toolInput.tables) ? toolInput.tables : [toolInput.tables]).join(', ')
+      : '';
+    labelText = names ? 'Schema: ' + names : 'Getting table schema\u2026';
+  } else if (tool === 'execute_sql') {
+    iconText  = '\u26A1'; // ⚡
+    labelText = (toolInput && toolInput.explanation) ? toolInput.explanation : 'Running query\u2026';
+    sqlText   = (toolInput && toolInput.sql) ? toolInput.sql : null;
+  } else if (tool === 'get_relationships') {
+    iconText  = '\uD83D\uDD17'; // 🔗
+    labelText = 'Getting table relationships\u2026';
+  } else if (tool === 'get_business_context') {
+    iconText  = '\uD83D\uDCD6'; // 📖
+    labelText = (toolInput && toolInput.topic)
+      ? 'Business context: ' + toolInput.topic
+      : 'Looking up business context\u2026';
   }
 
-  step.innerHTML =
-    `<div class="trace-tool-header">` +
-      `<span class="trace-icon">${icon}</span>` +
-      `<span class="trace-text">${label}</span>` +
-    `</div>${extra}`;
+  const header = document.createElement('div');
+  header.className = 'trace-tool-header';
+  const icon = document.createElement('span');
+  icon.className = 'trace-icon';
+  icon.textContent = iconText;
+  const label = document.createElement('span');
+  label.className = 'trace-text';
+  label.textContent = labelText;
+  header.appendChild(icon);
+  header.appendChild(label);
+  step.appendChild(header);
+
+  if (sqlText) {
+    const details = document.createElement('details');
+    details.className = 'trace-sql-details';
+    const summary = document.createElement('summary');
+    summary.className = 'trace-sql-summary';
+    summary.textContent = 'View SQL';
+    const pre = document.createElement('pre');
+    pre.className = 'trace-sql';
+    pre.textContent = sqlText;
+    details.appendChild(summary);
+    details.appendChild(pre);
+    step.appendChild(details);
+  }
 
   body.appendChild(step);
   scrollBottom();
@@ -139,28 +176,44 @@ function appendToolResult(stepEl, summary, isError) {
   if (!stepEl) return;
   const result = document.createElement('div');
   result.className = 'trace-result' + (isError ? ' trace-result-error' : '');
-  result.innerHTML =
-    `<span class="trace-arrow">\u2192</span> ${escHtml(summary || '')}`;
+  const arrow = document.createElement('span');
+  arrow.className = 'trace-arrow';
+  arrow.textContent = '\u2192 ';
+  result.appendChild(arrow);
+  result.appendChild(document.createTextNode(summary || ''));
   stepEl.appendChild(result);
   scrollBottom();
 }
 
 function collapseTrace(panel, stepCount) {
-  const id     = panel.id;
   const header = panel.querySelector('.trace-header');
   const body   = panel.querySelector('.trace-body');
+  if (!header || !body) return;
 
   panel.classList.add('trace-done');
+  const id    = panel.id;
+  const label = stepCount > 0 ? 'Agent trace \u00b7 ' + stepCount + ' steps' : 'Agent trace';
 
-  const label = stepCount > 0 ? `Agent trace \u00b7 ${stepCount} steps` : 'Agent trace';
   header.className = 'trace-header trace-header-done';
-  header.innerHTML =
-    `<span class="trace-done-icon">\u2713</span>` +
-    `<span class="trace-title">${label}</span>` +
-    `<button class="trace-toggle" onclick="toggleTrace('${id}')">&#9660; Show</button>`;
+  header.innerHTML = '';
 
-  body.style.display  = 'none';
-  panel.dataset.open  = 'false';
+  const tick = document.createElement('span');
+  tick.className = 'trace-done-icon';
+  tick.textContent = '\u2713';
+  const title = document.createElement('span');
+  title.className = 'trace-title';
+  title.textContent = label;
+  const btn = document.createElement('button');
+  btn.className = 'trace-toggle';
+  btn.innerHTML = '&#9660; Show';
+  btn.onclick = function() { toggleTrace(id); };
+
+  header.appendChild(tick);
+  header.appendChild(title);
+  header.appendChild(btn);
+
+  body.style.display = 'none';
+  panel.dataset.open = 'false';
 }
 
 function toggleTrace(id) {
@@ -168,17 +221,17 @@ function toggleTrace(id) {
   if (!panel) return;
   const body = panel.querySelector('.trace-body');
   const btn  = panel.querySelector('.trace-toggle');
-  const open = panel.dataset.open === 'true';
+  if (!body || !btn) return;
 
-  if (open) {
+  if (panel.dataset.open === 'true') {
     body.style.display = 'none';
     btn.innerHTML      = '&#9660; Show';
     panel.dataset.open = 'false';
   } else {
-    body.style.display = '';
+    body.style.display = 'flex';
     btn.innerHTML      = '&#9650; Hide';
     panel.dataset.open = 'true';
-    scrollBottom();
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 }
 
@@ -192,14 +245,17 @@ function showRateLimitCountdown(seconds, onDone) {
   _cancelRlCountdown();
   _rlEl = document.createElement('div');
   _rlEl.className = 'rl-notice';
-  _rlEl.innerHTML =
-    'Rate limit reached. Retrying in\u2026' +
-    `<span class="rl-countdown" id="rl-count">${seconds}s</span>`;
+  const countEl = document.createElement('span');
+  countEl.className = 'rl-countdown';
+  countEl.id = 'rl-count';
+  countEl.textContent = seconds + 's';
+  _rlEl.textContent = 'Rate limit reached. Retrying in\u2026 ';
+  _rlEl.appendChild(countEl);
   chatArea.appendChild(_rlEl);
   scrollBottom();
 
   let remaining = seconds;
-  _rlTimer = setInterval(() => {
+  _rlTimer = setInterval(function() {
     remaining--;
     const el = document.getElementById('rl-count');
     if (el) el.textContent = remaining + 's';
@@ -215,33 +271,38 @@ function _cancelRlCountdown() {
 
 // ── SSE reader ────────────────────────────────────────────────────────────────
 
-async function _readSSE(url, body, onEvent) {
+async function _readSSE(url, body, signal, onEvent) {
   const res = await fetch(url, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify(body),
+    signal:  signal,
   });
 
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
 
   const reader  = res.body.getReader();
   const decoder = new TextDecoder();
-  let buffer    = '';
+  let   buffer  = '';
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop();   // keep any incomplete trailing line
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
 
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const raw = line.slice(6).trim();
-      if (raw === '[DONE]') return;
-      try { onEvent(JSON.parse(raw)); } catch (_) {}
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (raw === '[DONE]') return;
+        try { onEvent(JSON.parse(raw)); } catch (_) {}
+      }
     }
+  } finally {
+    reader.cancel().catch(function() {});
   }
 }
 
@@ -249,21 +310,39 @@ async function _readSSE(url, body, onEvent) {
 // ── Main send flow ────────────────────────────────────────────────────────────
 
 async function sendQuestion(question) {
-  if (busy || !question.trim()) return;
+  question = (question || '').trim();
+  if (!question) return;
+
+  // Cancel any in-flight request before starting a new one
+  if (_activeAbort) {
+    _activeAbort.abort();
+    _activeAbort = null;
+  }
 
   addMessage(question, 'user');
   input.value = '';
   setDisabled(true);
 
+  const ctrl     = new AbortController();
+  _activeAbort   = ctrl;
+
   const panel       = createTracePanel();
-  let   stepCount   = 0;
-  let   lastStepEl  = null;
+  let stepCount     = 0;
+  let lastStepEl    = null;
+  let answered      = false;   // true once we receive 'answer' or 'error'
+  let hasThinking   = false;   // true once at least one thinking event arrives
+
+  function unlock() {
+    setDisabled(false);
+    input.focus();
+  }
 
   try {
     await _readSSE(
       '/ask',
-      { question, session_id: currentSessionId },
-      (event) => {
+      { question: question, session_id: currentSessionId },
+      ctrl.signal,
+      function(event) {
         switch (event.type) {
 
           case 'status':
@@ -271,12 +350,20 @@ async function sendQuestion(question) {
             break;
 
           case 'thinking':
+            hasThinking = true;
             stepCount++;
             lastStepEl = null;
             appendThinkingStep(panel, event.content);
             break;
 
           case 'tool_call':
+            // If the model called a tool without writing a thinking block first,
+            // inject a generic fallback so the trace panel is never empty.
+            if (!hasThinking) {
+              hasThinking = true;
+              stepCount++;
+              appendThinkingStep(panel, 'Analyzing the question\u2026');
+            }
             stepCount++;
             lastStepEl = appendToolCallStep(panel, event.tool, event.input);
             break;
@@ -287,9 +374,10 @@ async function sendQuestion(question) {
             break;
 
           case 'answer': {
-            currentSessionId = event.session_id || null;
-            if (currentSessionId) {
-              sessionStorage.setItem('agent_session_id', currentSessionId);
+            answered = true;
+            currentSessionId = event.session_id || currentSessionId;
+            if (event.session_id) {
+              sessionStorage.setItem('agent_session_id', event.session_id);
             }
             const q = event.queries_executed || 0;
             const n = event.iterations       || 0;
@@ -297,26 +385,26 @@ async function sendQuestion(question) {
             addMessage(
               event.content || 'No answer.',
               'ai',
-              `\uD83E\uDD16 Agent \u00b7 ${q} quer${q === 1 ? 'y' : 'ies'} \u00b7 ${n} step${n === 1 ? '' : 's'}`
+              '\uD83E\uDD16 Agent \u00b7 ' + q + ' quer' + (q === 1 ? 'y' : 'ies') +
+              ' \u00b7 ' + n + ' step' + (n === 1 ? '' : 's')
             );
-            setDisabled(false);
-            input.focus();
             break;
           }
 
           case 'error': {
+            answered = true;
             collapseTrace(panel, stepCount);
             if (event.retry_after) {
-              showRateLimitCountdown(event.retry_after, () => sendQuestion(question));
-              // keep disabled during countdown — sendQuestion re-enables when done
+              showRateLimitCountdown(
+                event.retry_after,
+                function() { sendQuestion(question); }
+              );
             } else {
               addMessage(
                 event.message || 'Agent encountered an error. Please try again.',
                 'ai',
                 '\u26A0 Error'
               );
-              setDisabled(false);
-              input.focus();
             }
             break;
           }
@@ -324,19 +412,23 @@ async function sendQuestion(question) {
       }
     );
 
-    // Stream ended cleanly without an answer/error event
-    // (shouldn't happen in practice, but handle gracefully)
-    if (busy) {
+  } catch (err) {
+    // AbortError = we cancelled it intentionally (new question, clear chat, etc.)
+    // Don't show an error message for that.
+    if (err.name !== 'AbortError' && !answered) {
       collapseTrace(panel, stepCount);
-      setDisabled(false);
-      input.focus();
+      addMessage('Connection error. Please try again.', 'ai');
     }
 
-  } catch (err) {
-    panel.remove();
-    addMessage('Connection error. Please try again.', 'ai');
-    setDisabled(false);
-    input.focus();
+  } finally {
+    // Always clean up — runs after normal return, abort, or error
+    if (_activeAbort === ctrl) _activeAbort = null;
+
+    // Rate-limit path: onDone callback handles re-send, keep disabled
+    const isRetrying = answered && document.getElementById('rl-count');
+    if (!isRetrying) {
+      unlock();
+    }
   }
 }
 
@@ -348,21 +440,19 @@ function sendFromInput() {
 // ── Clear Chat ────────────────────────────────────────────────────────────────
 
 async function clearChat() {
-  if (busy) return;
+  // Cancel any in-flight stream
+  if (_activeAbort) { _activeAbort.abort(); _activeAbort = null; }
+
   const sid = currentSessionId;
   if (sid) {
-    try {
-      await fetch(`/session/${sid}`, { method: 'DELETE' });
-    } catch (_) {}
+    try { await fetch('/session/' + sid, { method: 'DELETE' }); } catch (_) {}
   }
   sessionStorage.removeItem(_STORAGE_KEY);
   sessionStorage.removeItem('agent_session_id');
   currentSessionId = null;
   chatArea.innerHTML = '';
-  addMessage(
-    "Chat cleared. Ask me anything about your data.",
-    'ai'
-  );
+  setDisabled(false);
+  addMessage('Chat cleared. Ask me anything about your data.', 'ai');
   input.focus();
 }
 
@@ -372,16 +462,19 @@ async function clearChat() {
 async function resetData() {
   if (!confirm(
     'This will remove all connected sources, schemas, and business context.\n\n' +
-    'Your AI provider settings will be kept.\n\n' +
-    'Continue?'
+    'Your AI provider settings will be kept.\n\nContinue?'
   )) return;
+
   const btn = document.getElementById('resetBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Resetting\u2026'; }
+
+  if (_activeAbort) { _activeAbort.abort(); _activeAbort = null; }
+
   try {
     const res = await fetch('/setup/reset', { method: 'POST' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    if (!data.success) throw new Error(data.errors?.[0] || 'Reset failed');
+    if (!data.success) throw new Error((data.errors && data.errors[0]) || 'Reset failed');
     sessionStorage.removeItem(_STORAGE_KEY);
     sessionStorage.removeItem('agent_session_id');
     window.location.href = '/setup';
@@ -395,7 +488,6 @@ async function resetData() {
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 (function init() {
-  // Restore prior messages from this browser tab session
   try {
     const history = JSON.parse(sessionStorage.getItem(_STORAGE_KEY) || '[]');
     if (history.length > 0) {
@@ -421,10 +513,10 @@ async function resetData() {
   } catch (_) {}
 
   addMessage(
-    "Hello! I\u2019m your autonomous data analyst.\n\n" +
-    "Ask me anything about your data \u2014 I\u2019ll explore the database, " +
-    "run the queries, and give you direct answers.",
+    'Hello! I\u2019m your autonomous data analyst.\n\n' +
+    'Ask me anything about your data \u2014 I\u2019ll explore the database, ' +
+    'run the queries, and give you direct answers.',
     'ai'
   );
   input.focus();
-})();
+}());

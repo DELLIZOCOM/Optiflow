@@ -14,8 +14,11 @@ import time
 
 from app.sources.database.base import (
     DatabaseSource,
+    enrich_tables_data,
     write_schema_index,
     write_table_file,
+    write_relationships_file,
+    _infer_relationships,
 )
 
 logger = logging.getLogger(__name__)
@@ -176,10 +179,72 @@ class MSSQLSource(DatabaseSource):
 
     # ── Schema discovery ──────────────────────────────────────────────────────
 
+    def _query_pk_fk(self, cursor) -> dict:
+        """
+        Query MSSQL INFORMATION_SCHEMA for PK and FK constraints.
+        Returns {"pk_map": {table: [col,...]}, "fk_list": [{from_table, from_column, to_table, to_column}]}
+        """
+        pk_map: dict  = {}
+        fk_list: list = []
+
+        # Primary keys
+        try:
+            cursor.execute("""
+                SELECT tc.TABLE_NAME, kcu.COLUMN_NAME
+                FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+                  ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+                 AND tc.TABLE_SCHEMA    = kcu.TABLE_SCHEMA
+                WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                ORDER BY tc.TABLE_NAME, kcu.ORDINAL_POSITION
+            """)
+            for row in cursor.fetchall():
+                tname, cname = row[0], row[1]
+                pk_map.setdefault(tname, []).append(cname)
+        except Exception as exc:
+            logger.warning(f"[{self._name}] PK query failed (non-fatal): {exc}")
+
+        # Foreign keys
+        try:
+            cursor.execute("""
+                SELECT
+                    fk_tc.TABLE_NAME  AS from_table,
+                    fk_kcu.COLUMN_NAME AS from_column,
+                    pk_tc.TABLE_NAME  AS to_table,
+                    pk_kcu.COLUMN_NAME AS to_column
+                FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+                JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS fk_tc
+                  ON rc.CONSTRAINT_NAME        = fk_tc.CONSTRAINT_NAME
+                JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk_tc
+                  ON rc.UNIQUE_CONSTRAINT_NAME  = pk_tc.CONSTRAINT_NAME
+                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE fk_kcu
+                  ON rc.CONSTRAINT_NAME = fk_kcu.CONSTRAINT_NAME
+                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE pk_kcu
+                  ON rc.UNIQUE_CONSTRAINT_NAME = pk_kcu.CONSTRAINT_NAME
+                ORDER BY fk_tc.TABLE_NAME, fk_kcu.ORDINAL_POSITION
+            """)
+            for row in cursor.fetchall():
+                fk_list.append({
+                    "from_table":  row[0], "from_column": row[1],
+                    "to_table":    row[2], "to_column":   row[3],
+                    "confidence":  "confirmed",
+                })
+        except Exception as exc:
+            logger.warning(f"[{self._name}] FK query failed (non-fatal): {exc}")
+
+        return {"pk_map": pk_map, "fk_list": fk_list}
+
     def discover_schema(self, conn, db_name: str, server: str) -> dict:
-        """Discover all tables/columns/values. Writes to data/sources/{name}/."""
+        """
+        Discover all tables/columns/values with semantic metadata enrichment.
+        Writes to data/sources/{name}/:
+          - schema_index.md
+          - tables/{TableName}.md  (one per table, enriched with roles + relationships)
+          - relationships.md       (source-level relationship map)
+        """
         cursor = conn.cursor()
 
+        # ── 1. Get table list ─────────────────────────────────────────────────
         cursor.execute("""
             SELECT TABLE_NAME
             FROM INFORMATION_SCHEMA.TABLES
@@ -189,6 +254,14 @@ class MSSQLSource(DatabaseSource):
         """)
         table_names = [row[0] for row in cursor.fetchall()]
 
+        # ── 2. Get PK/FK constraints ──────────────────────────────────────────
+        pk_fk_data = self._query_pk_fk(cursor)
+        logger.info(
+            f"[{self._name}] Found {len(pk_fk_data['pk_map'])} PKs, "
+            f"{len(pk_fk_data['fk_list'])} confirmed FKs"
+        )
+
+        # ── 3. Collect raw column + sample data per table ─────────────────────
         tables_data = []
 
         for table_name in table_names:
@@ -215,10 +288,13 @@ class MSSQLSource(DatabaseSource):
                     full_type = f"{data_type}({max_len})"
                 else:
                     full_type = data_type
-                columns.append({"name": col_name, "type": full_type, "nullable": nullable == "YES"})
+                columns.append({
+                    "name": col_name, "type": full_type, "nullable": nullable == "YES"
+                })
                 if data_type in ("varchar", "nvarchar") and max_len and 0 < max_len <= 100:
                     categorical_candidates.append(col_name)
 
+            # Sample distinct values for short string cols
             categorical: dict = {}
             for col_name in categorical_candidates:
                 try:
@@ -239,7 +315,10 @@ class MSSQLSource(DatabaseSource):
                 "columns": columns, "categorical": categorical,
             })
 
-        # Write schema_index.md and per-table .md files
+        # ── 4. Enrich with semantic metadata (roles, PK, FK, type, grain, rels) ─
+        tables_data = enrich_tables_data(tables_data, pk_fk_data)
+
+        # ── 5. Write schema files ─────────────────────────────────────────────
         try:
             write_schema_index(
                 tables_data, self._schema_dir,
@@ -248,8 +327,17 @@ class MSSQLSource(DatabaseSource):
             tables_dir = self._schema_dir / "tables"
             for t in tables_data:
                 write_table_file(t, tables_dir)
+
+            # Write source-level relationships.md
+            confirmed_fks = pk_fk_data["fk_list"]
+            inferred_rels = _infer_relationships(tables_data, confirmed_fks)
+            write_relationships_file(
+                self._schema_dir, confirmed_fks, inferred_rels, tables_data
+            )
+
             logger.info(
-                f"[{self._name}] Schema discovery: {len(table_names)} tables "
+                f"[{self._name}] Schema discovery complete: {len(table_names)} tables, "
+                f"{len(confirmed_fks)} confirmed FKs, {len(inferred_rels)} inferred relationships "
                 f"→ data/sources/{self._name}/"
             )
         except Exception as exc:

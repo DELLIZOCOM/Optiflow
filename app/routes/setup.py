@@ -54,8 +54,8 @@ def init_router(source_registry, tool_registry, sessions=None):
     _sessions        = sessions
 
 
-def _reload_source(config: dict) -> None:
-    """Instantiate the right DataSource class and register it."""
+def _reload_source(config: dict, warm_cache: bool = True) -> None:
+    """Instantiate the right DataSource class, register it, and warm schema cache."""
     if _source_registry is None:
         return
     from app.sources.database.mssql import MSSQLSource
@@ -74,6 +74,11 @@ def _reload_source(config: dict) -> None:
     try:
         source = cls(name, config)
         _source_registry.register(source)
+        if warm_cache:
+            try:
+                source.load_cache()
+            except Exception as exc:
+                logger.warning(f"Schema cache warm failed for '{name}': {exc}")
         logger.info(f"Source '{name}' loaded into registry")
     except Exception as e:
         logger.error(f"Failed to load source '{name}': {e}")
@@ -296,7 +301,13 @@ async def setup_discover_schema(request: Request):
             }
             try:
                 await loop.run_in_executor(None, save_source_config, config)
-                _reload_source(config)
+                # Invalidate any stale cache on the existing source before reloading
+                if _source_registry:
+                    existing = _source_registry.get(source_name)
+                    if existing and hasattr(existing, "invalidate_cache"):
+                        existing.invalidate_cache()
+                # Re-register with fresh cache loaded from newly written files
+                _reload_source(config, warm_cache=True)
             except Exception as e:
                 logger.warning(f"Auto-save after discover-schema failed: {e}")
         return safe_json(result)

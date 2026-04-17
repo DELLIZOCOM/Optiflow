@@ -2,9 +2,9 @@
 DatabaseSource — shared base class for all SQL database sources.
 
 Provides:
-  - Schema file I/O (read/write schema_index.txt, tables/*.txt)
+  - Semantic metadata extraction (column role, table type, grain, relationships)
+  - Schema file I/O — writes enriched .md files per table + relationships.md
   - Table description derivation (rule-based, no AI)
-  - Key column selection for schema index
   - Shared properties (name, source_type, description, get_database_name)
 
 Each subclass (MSSQLSource, PostgreSQLSource, MySQLSource) implements:
@@ -110,7 +110,294 @@ def _select_key_columns(columns: list, max_cols: int = 5) -> list:
     return result
 
 
-# ── Schema file helpers ───────────────────────────────────────────────────────
+# ── Semantic classification ───────────────────────────────────────────────────
+
+_DATE_TYPES    = frozenset({"datetime", "datetime2", "date", "time", "smalldatetime", "timestamp"})
+_MONEY_TYPES   = frozenset({"decimal", "numeric", "money", "smallmoney", "float", "real"})
+_INT_TYPES     = frozenset({"int", "bigint", "smallint", "tinyint"})
+_STRING_TYPES  = frozenset({"varchar", "nvarchar", "char", "nchar"})
+_SKIP_TYPES    = frozenset({"image", "varbinary", "binary", "text", "ntext", "xml", "geography", "geometry"})
+
+_DATE_RE    = re.compile(r"date$|time$|month$|year$|_at$|_on$|created|updated|modified|inserted", re.I)
+_MEASURE_RE = re.compile(r"amount|total|qty|quantity|price|cost|rate|sum|balance|target|achieved|backlog|revenue|value|fee|tax|gst|discount|score|percent|pct|weight", re.I)
+_STATUS_RE  = re.compile(r"status|state|_type$|category|level|stage|phase|mode|flag$|indicator|class$|kind$|group$", re.I)
+_ID_RE      = re.compile(r"_id$|_pk$|_fk$|_code$|_no$|_number$|_num$|_key$|_ref$|^id$|^pk_|^fk_", re.I)
+_TEXT_RE    = re.compile(r"name$|title$|description|_desc$|_text$|note$|comment$|address|email|phone|mobile|subject|message$|remark$|detail$|_info$|label$", re.I)
+
+
+def _classify_column_role(col_name: str, col_type: str, cardinality: int, row_count: int) -> str:
+    """Classify a column's semantic role using heuristics on name, type, and cardinality."""
+    base_type = col_type.split("(")[0].lower()
+
+    if base_type in _SKIP_TYPES:
+        return "other"
+
+    # date_column: datetime types or name patterns
+    if base_type in _DATE_TYPES:
+        return "date_column"
+    if _DATE_RE.search(col_name):
+        return "date_column"
+
+    # identifier: ID/code/PK/FK name patterns
+    if _ID_RE.search(col_name):
+        return "identifier"
+
+    # measure: money types OR numeric with financial keywords
+    if base_type in _MONEY_TYPES:
+        return "measure"
+    if base_type in _INT_TYPES and _MEASURE_RE.search(col_name):
+        return "measure"
+
+    # status: string + low cardinality (≤ 20 distinct) + status-indicating name
+    if base_type in _STRING_TYPES and 0 < cardinality <= 20 and _STATUS_RE.search(col_name):
+        return "status"
+
+    # name/text: string + descriptive name keywords
+    if base_type in _STRING_TYPES and _TEXT_RE.search(col_name):
+        return "name_text"
+
+    # dimension: string + low-medium cardinality (≤ 50 distinct)
+    if base_type in _STRING_TYPES and 0 < cardinality <= 50:
+        return "dimension"
+
+    return "other"
+
+
+def _classify_table_type(
+    table_name: str,
+    columns: list,
+    row_count: int,
+    pk_columns: list,
+    all_relationships: list,
+) -> str:
+    """Classify a table as transaction, reference, junction, reporting, or configuration."""
+    name_lower = table_name.lower()
+
+    # Configuration: very low row count + settings/config name
+    if row_count < 50 and any(w in name_lower for w in ("setting", "config", "param")):
+        return "configuration"
+
+    # Junction: composite PK of 2+ columns
+    if len(pk_columns) >= 2:
+        return "junction"
+
+    col_roles = [col.get("role", "other") for col in columns]
+    has_dates   = "date_column" in col_roles
+    has_measures = "measure" in col_roles
+
+    # Is this table referenced by other tables (i.e., it is the "one" / reference side)
+    is_referenced = any(r["to_table"] == table_name for r in all_relationships)
+
+    # Reporting/target tables
+    if any(w in name_lower for w in ("target", "budget", "forecast", "summary", "report")):
+        return "reporting"
+
+    # Transaction: has both dates and measures
+    if has_dates and has_measures:
+        return "transaction"
+
+    # Reference/master: referenced by others, or has master/ref/lookup in name, or only dimensions
+    if is_referenced or any(w in name_lower for w in ("master", "lookup", "dict")):
+        return "reference"
+
+    return "transaction" if has_dates else "reference"
+
+
+def _detect_grain(table_name: str, pk_columns: list, table_type: str) -> str:
+    """Generate a plain-English description of what one row represents."""
+    name_lower = table_name.lower()
+
+    # Use table name keywords for well-known patterns
+    if "detail" in name_lower:
+        subject = re.sub(r"_?details?$", "", table_name, flags=re.I).strip("_")
+        return f"One row = one {subject} line item"
+    if "master" in name_lower:
+        subject = re.sub(r"_?master$", "", table_name, flags=re.I).strip("_")
+        return f"One row = one {subject} record"
+    if any(w in name_lower for w in ("log", "audit", "history")):
+        return "One row = one event or log entry"
+    if "target" in name_lower:
+        return "One row = one periodic target/goal entry"
+
+    if len(pk_columns) > 1:
+        return f"One row = one combination of ({', '.join(pk_columns)})"
+    if pk_columns:
+        return f"One row = one {table_name} record (identified by {pk_columns[0]})"
+    return f"One row = one {table_name} record"
+
+
+def _infer_relationships(tables_data: list, confirmed_fks: list) -> list:
+    """
+    Infer FK-style relationships from column name matching across tables.
+
+    Rules:
+    - Find column names that appear in 2+ tables
+    - Skip very generic names (id, name, status, type, date, etc.)
+    - If a column is a PK in one table → that table is the reference (one) side
+    - Otherwise use cardinality ratio (cardinality / row_count) to determine direction
+    - Returns list of {from_table, from_column, to_table, to_column, confidence: "inferred"}
+    """
+    _GENERIC_SKIP = frozenset({
+        "id", "name", "status", "type", "code", "no", "date",
+        "createddate", "updateddate", "createdat", "updatedat",
+        "created_date", "updated_date", "created_at", "updated_at",
+        "description", "notes", "remarks", "active", "enabled",
+        "sortorder", "sort_order", "displayorder",
+    })
+
+    confirmed_set = {
+        (r["from_table"].lower(), r["from_column"].lower(),
+         r["to_table"].lower(), r["to_column"].lower())
+        for r in confirmed_fks
+    }
+
+    # Build per-column occurrence map: col_name → list of {table, row_count, cardinality, is_pk}
+    col_map: dict = {}
+    pk_map: dict  = {}   # table_name → set of pk column names (lowercased)
+
+    for t in tables_data:
+        pk_set = {c.lower() for c in t.get("pk_columns", [])}
+        pk_map[t["name"].lower()] = pk_set
+        for col in t["columns"]:
+            cname = col["name"]
+            ckey  = cname.lower()
+            col_map.setdefault(ckey, []).append({
+                "table":       t["name"],
+                "col_exact":   cname,
+                "row_count":   t["row_count"],
+                "cardinality": col.get("cardinality", -1),
+                "is_pk":       ckey in pk_set,
+            })
+
+    inferred: list  = []
+    seen: set       = set()
+
+    for ckey, occurrences in col_map.items():
+        if len(occurrences) < 2:
+            continue
+        if ckey in _GENERIC_SKIP:
+            continue
+
+        for i in range(len(occurrences)):
+            for j in range(i + 1, len(occurrences)):
+                a, b = occurrences[i], occurrences[j]
+
+                # Both PKs → ambiguous, skip
+                if a["is_pk"] and b["is_pk"]:
+                    continue
+
+                # Determine ref (one) side vs fk (many) side
+                if a["is_pk"] and not b["is_pk"]:
+                    ref, fk = a, b
+                elif b["is_pk"] and not a["is_pk"]:
+                    ref, fk = b, a
+                else:
+                    # Use cardinality ratio: higher ratio → more unique → reference side
+                    def _ratio(x):
+                        if x["row_count"] > 0 and x["cardinality"] > 0:
+                            return x["cardinality"] / x["row_count"]
+                        return -1.0
+                    ra, rb = _ratio(a), _ratio(b)
+                    if ra > rb and ra > 0.7:
+                        ref, fk = a, b
+                    elif rb > ra and rb > 0.7:
+                        ref, fk = b, a
+                    else:
+                        continue  # can't determine direction reliably
+
+                key = (fk["table"].lower(), ckey, ref["table"].lower(), ckey)
+                if key in confirmed_set or key in seen:
+                    continue
+                seen.add(key)
+                inferred.append({
+                    "from_table":  fk["table"],
+                    "from_column": fk["col_exact"],
+                    "to_table":    ref["table"],
+                    "to_column":   ref["col_exact"],
+                    "confidence":  "inferred",
+                })
+
+    return inferred
+
+
+def enrich_tables_data(tables_data: list, pk_fk_data: dict) -> list:
+    """
+    Enrich raw tables_data with semantic metadata:
+      - pk_columns: list of PK column names per table
+      - per-column cardinality (from categorical dict or explicit cardinality field)
+      - per-column role classification
+      - confirmed FK references on each column
+
+    pk_fk_data = {
+        "pk_map":  {table_name: [col_name, ...]},
+        "fk_list": [{from_table, from_column, to_table, to_column}, ...]
+    }
+    """
+    pk_map  = pk_fk_data.get("pk_map", {})
+    fk_list = pk_fk_data.get("fk_list", [])
+
+    # Build confirmed FK lookup: (from_table, from_column) → (to_table, to_column)
+    fk_lookup: dict = {}
+    for fk in fk_list:
+        key = (fk["from_table"], fk["from_column"])
+        fk_lookup[key] = {"to_table": fk["to_table"], "to_column": fk["to_column"]}
+
+    # First pass: assign PK columns + column roles
+    for t in tables_data:
+        tname = t["name"]
+        t["pk_columns"]   = pk_map.get(tname, [])
+        t["confirmed_fks"] = [
+            fk for fk in fk_list if fk["from_table"] == tname
+        ]
+
+        categorical = t.get("categorical", {})
+        row_count   = t.get("row_count", 0)
+
+        for col in t["columns"]:
+            cname = col["name"]
+            # Cardinality: use categorical count if available, else explicit field
+            if cname in categorical:
+                col["cardinality"] = len(categorical[cname])
+            elif "cardinality" not in col:
+                col["cardinality"] = -1
+
+            # FK reference info
+            fk_ref = fk_lookup.get((tname, cname))
+            if fk_ref:
+                col["fk_ref"] = fk_ref
+                col["fk_confidence"] = "confirmed"
+
+            # Classify role
+            col["role"] = _classify_column_role(
+                cname, col["type"], col["cardinality"], row_count
+            )
+
+    # Second pass: compute all relationships (confirmed + inferred) — needed for table type
+    all_relationships = (
+        [{"from_table": f["from_table"], "from_column": f["from_column"],
+          "to_table": f["to_table"],    "to_column": f["to_column"],
+          "confidence": "confirmed"}
+         for f in fk_list]
+        + _infer_relationships(tables_data, fk_list)
+    )
+
+    # Third pass: classify table type + grain (need all_relationships)
+    for t in tables_data:
+        t["table_type"] = _classify_table_type(
+            t["name"], t["columns"], t["row_count"],
+            t["pk_columns"], all_relationships
+        )
+        t["grain"] = _detect_grain(t["name"], t["pk_columns"], t["table_type"])
+        # Attach relevant relationships for this table
+        t["relationships"] = [
+            r for r in all_relationships
+            if r["from_table"] == t["name"] or r["to_table"] == t["name"]
+        ]
+
+    return tables_data
+
+
+# ── Schema file writers ───────────────────────────────────────────────────────
 
 def write_schema_index(
     tables_data: list,
@@ -118,68 +405,213 @@ def write_schema_index(
     source_name: str = "",
     db_type: str = "",
 ) -> None:
-    """Write schema_index.md to schema_dir — markdown table of all tables."""
-    heading = source_name or schema_dir.name
+    """Write schema_index.md — markdown table of all tables."""
+    heading  = source_name or schema_dir.name
     db_label = db_type.upper() if db_type else "SQL"
     lines = [
         f"# {heading} ({db_label})",
         "",
-        "| Table | Description | Rows |",
-        "|-------|-------------|------|",
+        "| Table | Type | Description | Rows |",
+        "|-------|------|-------------|------|",
     ]
     for t in tables_data:
-        desc = _derive_table_description(t["name"], t["columns"])
-        lines.append(f"| {t['name']} | {desc} | {t['row_count']:,} |")
+        desc      = _derive_table_description(t["name"], t["columns"])
+        ttype     = t.get("table_type", "")
+        type_label = ttype.capitalize() if ttype else ""
+        lines.append(f"| {t['name']} | {type_label} | {desc} | {t['row_count']:,} |")
     schema_dir.mkdir(parents=True, exist_ok=True)
     (schema_dir / "schema_index.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     logger.info(f"Schema index written: {len(tables_data)} tables → {schema_dir}/schema_index.md")
 
 
+_ROLE_LABELS = {
+    "identifier":  "identifier",
+    "measure":     "measure",
+    "date_column": "date",
+    "status":      "status",
+    "name_text":   "name/text",
+    "dimension":   "dimension",
+    "other":       "",
+}
+
+
 def write_table_file(table: dict, tables_dir: Path) -> None:
-    """Write a per-table detail .md file to tables_dir/{TableName}.md."""
+    """Write an enriched per-table .md file with semantic metadata."""
     tables_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = re.sub(r"[^\w\-]", "_", table["name"])
-    path = tables_dir / f"{safe_name}.md"
-    categorical = table.get("categorical", {})
-    lines = [
-        f"# {table['name']}",
-        "",
-        f"**Row count**: {table['row_count']:,}",
-        "",
-        "## Columns",
-        "",
-        "| Column | Type | Nullable | Sample Values |",
-        "|--------|------|----------|---------------|",
-    ]
+    safe_name    = re.sub(r"[^\w\-]", "_", table["name"])
+    path         = tables_dir / f"{safe_name}.md"
+    categorical  = table.get("categorical", {})
+    pk_columns   = table.get("pk_columns", [])
+    table_type   = table.get("table_type", "")
+    grain        = table.get("grain", "")
+    relationships = table.get("relationships", [])
+
+    lines = [f"# {table['name']}", ""]
+    if table_type:
+        lines.append(f"**Type**: {table_type.capitalize()} table")
+    if grain:
+        lines.append(f"**Grain**: {grain}")
+    lines.append(f"**Row count**: {table['row_count']:,}")
+    if pk_columns:
+        lines.append(f"**Primary key**: {', '.join(pk_columns)}")
+    lines += ["", "## Columns", "",
+              "| Column | Type | Role | Nullable | Sample Values |",
+              "|--------|------|------|----------|---------------|"]
+
     for col in table["columns"]:
-        null_str = "NULL" if col["nullable"] else "NOT NULL"
+        cname    = col["name"]
+        null_str = "NULL" if col.get("nullable") else "NOT NULL"
+        role     = _ROLE_LABELS.get(col.get("role", "other"), "")
+
+        # Build sample values string
         samples = ""
-        if col["name"] in categorical:
-            vals = categorical[col["name"]]
+        if cname in categorical:
+            vals = categorical[cname]
             if vals:
                 samples = ", ".join(
                     f'"{v}"' if isinstance(v, str) else str(v)
-                    for v in vals[:5]
+                    for v in vals[:6]
                 )
-        lines.append(f"| {col['name']} | {col['type']} | {null_str} | {samples} |")
+
+        # Append FK annotation to type if confirmed
+        fk_ref = col.get("fk_ref")
+        type_str = col["type"]
+        if fk_ref:
+            type_str += f" → {fk_ref['to_table']}.{fk_ref['to_column']}"
+
+        lines.append(f"| {cname} | {type_str} | {role} | {null_str} | {samples} |")
+
+    # Relationships section
+    outgoing = [r for r in relationships if r["from_table"] == table["name"]]
+    incoming = [r for r in relationships if r["to_table"] == table["name"]]
+
+    if outgoing or incoming:
+        lines += ["", "## Relationships"]
+        for r in outgoing:
+            tag = "" if r["confidence"] == "confirmed" else " (inferred)"
+            lines.append(f"- **{r['from_column']}** → {r['to_table']}.{r['to_column']}{tag}")
+        for r in incoming:
+            tag = "" if r["confidence"] == "confirmed" else " (inferred)"
+            lines.append(f"- **{r['from_column']}** ← {r['from_table']}.{r['from_column']}{tag}")
+
+    # Categorical sample values section
+    status_cols = {
+        c["name"] for c in table["columns"]
+        if c.get("role") in ("status", "dimension") and c["name"] in categorical
+    }
+    if status_cols:
+        lines += ["", "## Categorical values"]
+        for cname in sorted(status_cols):
+            vals = categorical.get(cname, [])
+            if vals:
+                formatted = ", ".join(f'"{v}"' for v in vals)
+                lines.append(f"- **{cname}**: {formatted}")
+
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_relationships_file(
+    schema_dir: Path,
+    confirmed_fks: list,
+    inferred_rels: list,
+    tables_data: list,
+) -> None:
+    """Write relationships.md — source-level map of all table relationships."""
+    source_name = schema_dir.name
+    lines = [f"# Relationships: {source_name}", ""]
+
+    # Confirmed FK constraints
+    lines += ["## Confirmed (from database constraints)", ""]
+    if confirmed_fks:
+        for r in confirmed_fks:
+            lines.append(
+                f"- {r['from_table']}.{r['from_column']} → "
+                f"{r['to_table']}.{r['to_column']}"
+            )
+    else:
+        lines.append("_(No explicit FK constraints found in this database)_")
+    lines.append("")
+
+    # Inferred relationships
+    lines += ["## Inferred (from column name matching)", ""]
+    if inferred_rels:
+        for r in inferred_rels:
+            lines.append(
+                f"- {r['from_table']}.{r['from_column']} → "
+                f"{r['to_table']}.{r['to_column']}"
+            )
+    else:
+        lines.append("_(No inferred relationships detected)_")
+    lines.append("")
+
+    # Join paths — derive useful multi-hop paths
+    all_rels = confirmed_fks + inferred_rels
+    join_paths = _derive_join_paths(all_rels, tables_data)
+    if join_paths:
+        lines += ["## Common join paths", ""]
+        for path_str in join_paths:
+            lines.append(f"- {path_str}")
+
+    schema_dir.mkdir(parents=True, exist_ok=True)
+    (schema_dir / "relationships.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    logger.info(f"Relationships file written → {schema_dir}/relationships.md")
+
+
+def _derive_join_paths(all_rels: list, tables_data: list) -> list:
+    """Derive readable multi-hop join path descriptions."""
+    paths = []
+    # Build adjacency: table → [(other_table, via_column)]
+    adj: dict = {}
+    for r in all_rels:
+        adj.setdefault(r["from_table"], []).append(
+            (r["to_table"], r["from_column"], r["to_column"])
+        )
+
+    # Find transaction tables (likely starting points for analysis)
+    tx_tables = {
+        t["name"] for t in tables_data
+        if t.get("table_type") in ("transaction", "reporting")
+    }
+    ref_tables = {
+        t["name"] for t in tables_data
+        if t.get("table_type") == "reference"
+    }
+
+    seen_paths: set = set()
+    for tx in sorted(tx_tables):
+        for to_table, from_col, to_col in adj.get(tx, []):
+            path_str = f"{tx}.{from_col} → {to_table}.{to_col}"
+            if path_str not in seen_paths:
+                seen_paths.add(path_str)
+                paths.append(path_str)
+            # One more hop
+            for to2, fc2, tc2 in adj.get(to_table, []):
+                path2 = f"{tx} → {to_table} → {to2} (via {from_col}/{fc2})"
+                if path2 not in seen_paths:
+                    seen_paths.add(path2)
+                    paths.append(path2)
+
+    return paths[:30]  # cap at 30 entries
 
 
 # ── DatabaseSource base ───────────────────────────────────────────────────────
 
 class DatabaseSource:
-    """Base class for all SQL database sources.
-
-    Stores config, manages per-source schema directories, reads schema files.
-    Subclasses implement: connect, execute_query, discover_schema,
-    get_system_prompt_section, get_db_type, validate_credentials.
-    """
+    """Base class for all SQL database sources."""
 
     def __init__(self, name: str, config: dict):
         self._name   = name
         self._config = config
         from app.config import SOURCES_DATA_DIR
         self._schema_dir = SOURCES_DATA_DIR / name   # data/sources/{name}/
+
+        # ── In-memory schema cache ────────────────────────────────────────────
+        # Populated by load_cache() at startup and after schema rediscovery.
+        # Zero disk reads at query time once warmed.
+        self._cache_index:         str            = ""       # schema_index.md
+        self._cache_relationships: Optional[str]  = None     # relationships.md
+        self._cache_tables:        dict[str, str] = {}       # {stem_lower: content}
+        self._cache_loaded:        bool           = False
 
     # ── DataSource protocol properties ────────────────────────────────────────
 
@@ -198,50 +630,94 @@ class DatabaseSource:
             f"{self.source_type.upper()} database '{self.get_database_name()}'"
         )
 
-    # ── Schema file reads ─────────────────────────────────────────────────────
+    # ── Schema cache management ───────────────────────────────────────────────
 
-    def get_table_index(self) -> str:
-        """Read schema_index.md (preferred) or fall back to schema_index.txt."""
+    def load_cache(self) -> None:
+        """
+        Read all schema files into memory.  Call once at startup and again
+        after every schema rediscovery so tools never touch disk at query time.
+        """
+        # schema_index
+        self._cache_index = ""
         for fname in ("schema_index.md", "schema_index.txt"):
-            path = self._schema_dir / fname
+            p = self._schema_dir / fname
             try:
-                return path.read_text(encoding="utf-8")
+                self._cache_index = p.read_text(encoding="utf-8")
+                break
             except FileNotFoundError:
                 continue
             except Exception as exc:
-                logger.warning(f"[{self._name}] get_table_index({fname}) failed: {exc}")
-        return ""
+                logger.warning(f"[{self._name}] cache: read {fname} failed: {exc}")
+
+        # relationships
+        self._cache_relationships = None
+        rel_path = self._schema_dir / "relationships.md"
+        try:
+            self._cache_relationships = rel_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            logger.warning(f"[{self._name}] cache: read relationships.md failed: {exc}")
+
+        # per-table files
+        self._cache_tables = {}
+        tables_dir = self._schema_dir / "tables"
+        if tables_dir.is_dir():
+            for p in tables_dir.iterdir():
+                if p.suffix in (".md", ".txt"):
+                    try:
+                        self._cache_tables[p.stem.lower()] = p.read_text(encoding="utf-8")
+                    except Exception as exc:
+                        logger.warning(f"[{self._name}] cache: read {p.name} failed: {exc}")
+
+        self._cache_loaded = True
+        logger.info(
+            f"[{self._name}] Schema cache loaded: "
+            f"{len(self._cache_tables)} table file(s), "
+            f"index={'yes' if self._cache_index else 'no'}, "
+            f"relationships={'yes' if self._cache_relationships else 'no'}"
+        )
+
+    def invalidate_cache(self) -> None:
+        """Clear the in-memory cache (called before rediscovery writes new files)."""
+        self._cache_index         = ""
+        self._cache_relationships = None
+        self._cache_tables        = {}
+        self._cache_loaded        = False
+
+    # ── Schema file reads (cache-first) ───────────────────────────────────────
+
+    def get_table_index(self) -> str:
+        """Return schema_index content from cache; fall back to disk if not loaded."""
+        if self._cache_loaded:
+            return self._cache_index
+        # Fallback: warm cache on the fly
+        self.load_cache()
+        return self._cache_index
 
     def get_compact_index(self) -> str:
         return self.get_table_index()
 
     def get_table_detail(self, table_name: str) -> Optional[str]:
-        """Read per-table .md file (preferred) or fall back to .txt."""
-        tables_dir = self._schema_dir / "tables"
-        if not tables_dir.is_dir():
-            return None
-        safe = re.sub(r"[^\w\-]", "_", table_name)
-        candidates = [
-            f"{safe}.md", f"{table_name}.md",
-            f"{safe}.txt", f"{table_name}.txt",
-        ]
-        for fname in candidates:
-            p = tables_dir / fname
-            if p.exists():
-                return p.read_text(encoding="utf-8")
-        # Case-insensitive fallback
-        try:
-            target_md  = table_name.lower() + ".md"
-            target_txt = table_name.lower() + ".txt"
-            for fname in os.listdir(tables_dir):
-                fl = fname.lower()
-                if fl == target_md or fl == target_txt:
-                    return (tables_dir / fname).read_text(encoding="utf-8")
-        except Exception:
-            pass
-        return None
+        """Return per-table schema from cache; fall back to disk if not loaded."""
+        if self._cache_loaded:
+            return self._cache_tables.get(table_name.lower())
+
+        # Fallback: warm cache, then retry
+        self.load_cache()
+        return self._cache_tables.get(table_name.lower())
+
+    def get_relationships(self) -> Optional[str]:
+        """Return relationships.md from cache; fall back to disk if not loaded."""
+        if self._cache_loaded:
+            return self._cache_relationships
+
+        self.load_cache()
+        return self._cache_relationships
 
     def get_available_tables(self) -> list[str]:
+        if self._cache_loaded:
+            return sorted(self._cache_tables.keys())
         tables_dir = self._schema_dir / "tables"
         if not tables_dir.is_dir():
             return []
@@ -250,6 +726,8 @@ class DatabaseSource:
         return sorted(stems)
 
     def schema_discovered(self) -> bool:
+        if self._cache_loaded:
+            return bool(self._cache_index)
         return (
             (self._schema_dir / "schema_index.md").exists()
             or (self._schema_dir / "schema_index.txt").exists()

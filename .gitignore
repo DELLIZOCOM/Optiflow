@@ -12,6 +12,7 @@ data/config/sources/
 # Runtime data (generated, may contain sensitive DB info)
 # =====================
 data/sources/
+data/cache/
 data/knowledge/company.md
 data/knowledge/suggested_questions.json
 data/logs/audit.jsonl

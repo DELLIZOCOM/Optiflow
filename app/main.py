@@ -70,7 +70,7 @@ def _instantiate_source(config: dict):
 
 
 def load_sources() -> None:
-    """Load all source configs and register DataSource instances."""
+    """Load all source configs, register DataSource instances, and warm schema cache."""
     from app.config import load_source_configs
 
     configs = load_source_configs()
@@ -78,6 +78,11 @@ def load_sources() -> None:
         source = _instantiate_source(cfg)
         if source:
             _source_registry.register(source)
+            # Warm in-memory schema cache so tools never touch disk at query time
+            try:
+                source.load_cache()
+            except Exception as exc:
+                logger.warning(f"Schema cache warm failed for '{source.name}': {exc}")
 
     logger.info(
         f"Sources loaded: {len(_source_registry.get_all())} source(s) — "

@@ -66,6 +66,107 @@ def _summarize_result(result) -> str:
     return (content[:80] + "…") if len(content) > 80 else content
 
 
+def _compress_turn(prior_messages: list, new_messages: list, final_answer: str) -> list:
+    """
+    Replace the just-completed turn (new_messages, i.e. the messages added this
+    question) with a compact 2-message summary before storing in session history.
+
+    Compresses to:
+      user:      original question text (stripped of any [System note:...] we injected)
+      assistant: [Previous answer] <answer>
+                 [Context] Tables: X, Y | SQL: <sql1> ; <sql2>
+
+    prior_messages  = messages that were in the session BEFORE this question
+    new_messages    = all messages from this turn (user question + assistant + tool results)
+    final_answer    = the text we emitted as the 'answer' event
+    """
+    if not new_messages:
+        return prior_messages
+
+    # ── Extract original user question (strip system note suffix) ────────────
+    first_user = new_messages[0]
+    raw_question: str = ""
+    if isinstance(first_user.get("content"), str):
+        raw_question = first_user["content"]
+    # Strip injected system note
+    for marker in ("\n\n[System note:", "\n\n[System Note:"):
+        idx = raw_question.find(marker)
+        if idx != -1:
+            raw_question = raw_question[:idx]
+    raw_question = raw_question.strip()
+
+    # ── Collect SQL statements and table names from this turn ─────────────────
+    sql_statements: list[str] = []
+    tables_used: list[str]    = []
+
+    for m in new_messages:
+        if m.get("role") == "assistant":
+            content = m.get("content", [])
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use":
+                    tool_name  = block.get("name", "")
+                    tool_input = block.get("input", {}) or {}
+                    if tool_name == "execute_sql" and tool_input.get("sql"):
+                        sql_statements.append(tool_input["sql"].strip())
+                    if tool_name == "get_table_schema":
+                        tbls = tool_input.get("tables", [])
+                        if isinstance(tbls, list):
+                            tables_used.extend(tbls)
+
+    # Deduplicate while preserving order
+    seen: set = set()
+    tables_deduped: list[str] = []
+    for t in tables_used:
+        if t not in seen:
+            seen.add(t)
+            tables_deduped.append(t)
+
+    # ── Build compressed context line ─────────────────────────────────────────
+    context_parts: list[str] = []
+    if tables_deduped:
+        context_parts.append("Tables: " + ", ".join(tables_deduped))
+    if sql_statements:
+        sql_summary = " ; ".join(s.replace("\n", " ")[:200] for s in sql_statements)
+        context_parts.append("SQL: " + sql_summary)
+    context_line = " | ".join(context_parts) if context_parts else "No SQL executed"
+
+    # Wrap in <thinking> so the model sees the pattern and continues writing
+    # thinking blocks for follow-up questions.
+    compressed_answer = (
+        f"<thinking>\n"
+        f"{context_line}\n"
+        f"</thinking>\n\n"
+        f"{final_answer.strip()}"
+    )
+
+    compressed: list = [
+        {"role": "user",      "content": raw_question},
+        {"role": "assistant", "content": compressed_answer},
+    ]
+    return prior_messages + compressed
+
+
+def _tool_id_is_list_tables(tool_use_id: str, messages: list) -> bool:
+    """Return True if the given tool_use_id corresponds to a list_tables call."""
+    for m in messages:
+        if m.get("role") != "assistant":
+            continue
+        content = m.get("content", [])
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if (isinstance(block, dict)
+                    and block.get("type") == "tool_use"
+                    and block.get("id") == tool_use_id
+                    and block.get("name") == "list_tables"):
+                return True
+    return False
+
+
 def _content_to_list(content_blocks) -> list[dict]:
     result = []
     for block in content_blocks:
@@ -126,28 +227,21 @@ class AgentOrchestrator:
             "and last 10 days using this date and timezone unless the user specifies otherwise."
         )
 
-        # Inject connected source names so the agent never has to guess
+        # Tell the agent how many sources are connected (names come from list_tables)
         sources = self._sources.get_all()
         if len(sources) == 1:
             s = sources[0]
             prompt += (
                 f"\n\n## Connected Database\n\n"
-                f"Source name: `{s.name}` | Type: {s.get_db_type().upper()} | "
+                f"Source: `{s.name}` | Type: {s.get_db_type().upper()} | "
                 f"Database: {s.get_database_name()}\n"
-                f"Use `{s.name}` as the `source` value in any tool call that asks for it."
+                "Call `list_tables` to get the full schema directory, relationships, and dialect rules."
             )
-            section = s.get_system_prompt_section().strip()
-            if section:
-                prompt += f"\n\n{section}"
         elif len(sources) > 1:
             prompt += "\n\n## Connected Databases\n\n"
             for s in sources:
                 prompt += f"- `{s.name}` ({s.get_db_type().upper()}, db: {s.get_database_name()})\n"
-            prompt += "\nSpecify the correct `source` name in every tool call."
-            for s in sources:
-                section = s.get_system_prompt_section().strip()
-                if section:
-                    prompt += f"\n\n### Dialect Notes For `{s.name}`\n{section}"
+            prompt += "\nCall `list_tables(source=<name>)` for each source you need to query."
 
         # Append company knowledge — the agent's domain map
         try:
@@ -204,9 +298,43 @@ class AgentOrchestrator:
         """Run the ReAct loop and yield SSE-friendly progress events."""
         from app.ai.client import RateLimitExhausted
 
-        session_id = self._sessions.get_or_create(session_id)
-        messages   = self._sessions.get_messages(session_id)
-        messages.append({"role": "user", "content": question})
+        session_id     = self._sessions.get_or_create(session_id)
+        prior_messages = self._sessions.get_messages(session_id)   # snapshot before this turn
+        messages       = list(prior_messages)                       # working copy
+
+        # ── Follow-up hint: skip list_tables if session has prior history ─────
+        # If the conversation already has turns, the schema overview was already
+        # fetched in a previous question — tell the agent to skip list_tables.
+        has_prior_history = len(messages) > 0
+        has_list_tables_result = any(
+            isinstance(m.get("content"), list)
+            and any(
+                isinstance(b, dict) and b.get("type") == "tool_result"
+                and _tool_id_is_list_tables(b.get("tool_use_id", ""), messages)
+                for b in m["content"]
+            )
+            for m in messages
+            if m.get("role") == "user"
+        )
+        user_content: str = question
+        if has_prior_history and has_list_tables_result:
+            user_content = (
+                question
+                + "\n\n[System note: You already have the schema overview from earlier in this "
+                "conversation. Do NOT call list_tables again — go directly to get_table_schema "
+                "for the specific tables you need. "
+                "Still write a <thinking> block before each tool call as usual.]"
+            )
+        elif has_prior_history:
+            user_content = (
+                question
+                + "\n\n[System note: This is a follow-up question. "
+                "If you already know the relevant tables from earlier context, "
+                "skip list_tables and go directly to get_table_schema. "
+                "Still write a <thinking> block before each tool call as usual.]"
+            )
+
+        messages.append({"role": "user", "content": user_content})
 
         system           = self._build_system_prompt()
         tools_used: list = []
@@ -222,10 +350,12 @@ class AgentOrchestrator:
                 logger.info(f"[Agent] Iteration {iteration}")
                 yield {"type": "status", "message": f"Thinking… (step {iteration})"}
 
-                # ── 200 ms minimum gap between LLM calls ──────────────────────
+                # ── Orchestrator-level call gap (belt-and-suspenders with AIClient) ──
+                # AIClient enforces _MIN_CALL_GAP_S (500ms); this is a lighter
+                # local check to avoid tight loops if the AI client is bypassed.
                 elapsed = time.monotonic() - _last_call_ts
-                if elapsed < 0.2:
-                    await asyncio.sleep(0.2 - elapsed)
+                if elapsed < 0.1:
+                    await asyncio.sleep(0.1 - elapsed)
 
                 # ── Two iterations before limit, remove tools to force answer ─
                 force_final = (iteration >= self._max_iter - 2)
@@ -284,13 +414,26 @@ class AgentOrchestrator:
                 for thought in all_thoughts:
                     yield {"type": "thinking", "content": thought}
 
+                # Also emit pre-tool text as thinking — LLM sometimes writes
+                # reasoning without <thinking> tags when it's about to call a tool
+                if tool_blocks:
+                    for text in text_remainder:
+                        if text.strip():
+                            yield {"type": "thinking", "content": text.strip()}
+
                 stop_reason = response.stop_reason
 
                 # ── Done ──────────────────────────────────────────────────────
                 if stop_reason == "end_turn":
                     answer = "\n\n".join(text_remainder)
                     logger.info(f"[Agent] Final answer: {answer[:300]}")
-                    self._sessions.set_messages(session_id, messages)
+
+                    # Compress this turn: replace full tool call/result chains
+                    # with a compact 2-message summary to keep context lean.
+                    new_messages = messages[len(prior_messages):]
+                    compressed   = _compress_turn(prior_messages, new_messages, answer)
+                    self._sessions.set_messages(session_id, compressed)
+
                     yield {
                         "type":             "answer",
                         "content":          answer,

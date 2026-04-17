@@ -753,6 +753,20 @@
       font-weight: normal;
     }
 
+    /* SQL disclosure element inside trace tool step */
+    .trace-sql-details {
+      margin: 4px 0 2px 22px;
+    }
+    .trace-sql-summary {
+      font-size: 11px;
+      color: #868e96;
+      cursor: pointer;
+      user-select: none;
+      padding: 2px 0;
+    }
+    .trace-sql-summary:hover {
+      color: #495057;
+    }
     /* SQL block inside a trace tool step */
     .trace-sql {
       background: #1e1e2e;
@@ -764,8 +778,8 @@
       line-height: 1.5;
       overflow-x: auto;
       white-space: pre;
-      margin: 4px 0 2px 22px;
-      max-height: 130px;
+      margin: 4px 0 2px 0;
+      max-height: 200px;
       border: 1px solid #313244;
     }
 

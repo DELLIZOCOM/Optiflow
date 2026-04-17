@@ -109,11 +109,17 @@ async def rediscover_source(name: str):
     loop = asyncio.get_event_loop()
 
     def _do_discover():
+        # Invalidate stale cache before writing new schema files
+        if hasattr(source, "invalidate_cache"):
+            source.invalidate_cache()
         conn, driver, error = source.connect()
         if not conn:
             return {"success": False, "error": error}
         try:
             result = source.discover_schema(conn, source.get_database_name(), source._server)
+            # Reload cache from newly written files
+            if hasattr(source, "load_cache"):
+                source.load_cache()
             return {"success": True, "tables": len(result.get("tables", []))}
         finally:
             try:

@@ -22,6 +22,7 @@ SOURCES_CONFIG_DIR = CONFIG_DIR / "sources"   # data/config/sources/
 SOURCES_DATA_DIR   = DATA_DIR / "sources"     # data/sources/{name}/
 KNOWLEDGE_DIR      = DATA_DIR / "knowledge"
 LOGS_DIR           = DATA_DIR / "logs"
+CACHE_DIR          = DATA_DIR / "cache"        # data/cache/ (SQLite sessions, etc.)
 
 SECRET_PATH        = CONFIG_DIR / ".secret"
 APP_CONFIG_PATH    = CONFIG_DIR / "app.json"

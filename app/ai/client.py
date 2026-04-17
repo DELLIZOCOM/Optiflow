@@ -7,6 +7,7 @@ take effect without restarting the server.
 Supported providers: anthropic | openai | custom
 """
 
+import asyncio
 import collections
 import logging
 import time
@@ -15,28 +16,81 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # ── Rate limiter ──────────────────────────────────────────────────────────────
+#
+# Two layers of protection:
+#   1. Sliding-window counter: track call timestamps over a 60s window.
+#      If we're about to exceed _MAX_CALLS_PER_MIN, sleep until there's room.
+#   2. Minimum gap: enforce at least _MIN_CALL_GAP_S seconds between consecutive
+#      calls so the agent can't burst-fire 4 requests in < 1 second.
+#
+# Sync callers (setup wizard) use _record_call() + time.sleep.
+# Async callers (agent loop) use _async_record_call() + asyncio.sleep.
 
 _call_timestamps: collections.deque = collections.deque()
-_RATE_LIMIT_WINDOW = 60
-_MAX_CALLS_PER_MIN = 25
+_last_call_time:  float             = 0.0
+_RATE_LIMIT_WINDOW  = 60     # seconds
+_MAX_CALLS_PER_MIN  = 15     # conservative — Anthropic free tier is 5/min, paid is higher
+_MIN_CALL_GAP_S     = 0.5    # minimum seconds between consecutive LLM calls
 
 
 def _record_call() -> None:
+    """Sync rate gate — used by get_completion() (setup wizard calls)."""
+    global _last_call_time
+
     now = time.time()
+
+    # Enforce minimum gap
+    gap = now - _last_call_time
+    if _last_call_time > 0 and gap < _MIN_CALL_GAP_S:
+        time.sleep(_MIN_CALL_GAP_S - gap)
+        now = time.time()
+
+    # Sliding window check
     while _call_timestamps and _call_timestamps[0] < now - _RATE_LIMIT_WINDOW:
         _call_timestamps.popleft()
+
     if len(_call_timestamps) >= _MAX_CALLS_PER_MIN:
         wait_secs = (_call_timestamps[0] + _RATE_LIMIT_WINDOW) - now + 0.1
-        if 0 < wait_secs <= 5:
-            logger.info(f"Rate limit approaching: queuing for {wait_secs:.1f}s")
+        if wait_secs > 0:
+            logger.info(f"[RateLimit] Sync: window full, sleeping {wait_secs:.1f}s")
             time.sleep(wait_secs)
-        elif wait_secs > 5:
-            logger.warning(f"Rate limit queue would be {wait_secs:.0f}s — proceeding immediately")
+            now = time.time()
+
     _call_timestamps.append(time.time())
+    _last_call_time = time.time()
+
+
+async def _async_record_call() -> None:
+    """Async rate gate — used by AIClient.complete() (agent loop calls)."""
+    global _last_call_time
+
+    now = time.monotonic()
+
+    # Enforce minimum gap between consecutive calls
+    gap = now - _last_call_time
+    if _last_call_time > 0 and gap < _MIN_CALL_GAP_S:
+        sleep_for = _MIN_CALL_GAP_S - gap
+        logger.debug(f"[RateLimit] Min gap: sleeping {sleep_for:.2f}s")
+        await asyncio.sleep(sleep_for)
+
+    # Sliding window check (uses wall time for the deque)
+    wall = time.time()
+    while _call_timestamps and _call_timestamps[0] < wall - _RATE_LIMIT_WINDOW:
+        _call_timestamps.popleft()
+
+    if len(_call_timestamps) >= _MAX_CALLS_PER_MIN:
+        wait_secs = (_call_timestamps[0] + _RATE_LIMIT_WINDOW) - wall + 0.1
+        if wait_secs > 0:
+            logger.info(f"[RateLimit] Async: window full, sleeping {wait_secs:.1f}s")
+            await asyncio.sleep(wait_secs)
+            wall = time.time()
+
+    _call_timestamps.append(time.time())
+    _last_call_time = time.monotonic()
 
 
 class RateLimitExhausted(RuntimeError):
-    """Raised when a 429 rate-limit error is received."""
+    """Raised when a 429 rate-limit error is received from the API."""
     def __init__(self, message: str = "Rate limit hit", retry_after: int = 60):
         super().__init__(message)
         self.retry_after = retry_after
@@ -47,7 +101,7 @@ class RateLimitExhausted(RuntimeError):
 def get_completion(
     system: str,
     user: str,
-    max_tokens: int = 2000,
+    max_tokens: int = 8000,
     temperature: float = 0,
 ) -> str:
     """Make a text completion using the configured AI provider. Returns response text."""
@@ -156,7 +210,7 @@ class AIClient:
         messages: list[dict],
         system: str,
         tools: Optional[list[dict]] = None,
-        max_tokens: int = 4096,
+        max_tokens: int = 16000,
     ):
         """Call Anthropic messages.create with optional tool definitions.
 
@@ -184,6 +238,8 @@ class AIClient:
 
         import anthropic
 
+        await _async_record_call()
+
         client = anthropic.AsyncAnthropic(api_key=api_key)
         kwargs: dict = dict(
             model=model,
@@ -193,15 +249,29 @@ class AIClient:
         )
         if tools:
             kwargs["tools"] = tools
-        try:
-            return await client.messages.create(**kwargs)
-        except anthropic.RateLimitError as exc:
-            retry_after = 60
+
+        # One automatic retry on 429: wait the retry-after duration, then try once more.
+        # If it fails again, raise RateLimitExhausted so the orchestrator can surface
+        # the countdown to the user.
+        for attempt in range(2):
             try:
-                retry_after = int(exc.response.headers.get("retry-after", "60"))
-            except Exception:
-                pass
-            logger.warning(f"[AIClient] Rate limit — retry_after={retry_after}s")
-            raise RateLimitExhausted(retry_after=retry_after) from exc
-        except Exception as exc:
-            raise RuntimeError(f"AI API call failed: {exc}") from exc
+                return await client.messages.create(**kwargs)
+            except anthropic.RateLimitError as exc:
+                retry_after = 60
+                try:
+                    retry_after = int(exc.response.headers.get("retry-after", "60"))
+                except Exception:
+                    pass
+                logger.warning(
+                    f"[AIClient] 429 received (attempt {attempt + 1}/2) — "
+                    f"retry_after={retry_after}s"
+                )
+                if attempt == 0 and retry_after <= 65:
+                    # Auto-wait and retry once for short waits (≤ 65s)
+                    logger.info(f"[AIClient] Auto-waiting {retry_after}s before retry…")
+                    await asyncio.sleep(retry_after)
+                    await _async_record_call()   # re-check rate gate after sleep
+                    continue
+                raise RateLimitExhausted(retry_after=retry_after) from exc
+            except Exception as exc:
+                raise RuntimeError(f"AI API call failed: {exc}") from exc

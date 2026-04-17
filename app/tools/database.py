@@ -27,6 +27,33 @@ _SELECT_RE = re.compile(
 )
 
 
+_DIALECT_HINTS = {
+    "MSSQL": (
+        "**SQL dialect: SQL Server** — "
+        "row limit: `SELECT TOP N` | dates: `GETDATE()`, `CONVERT(date, GETDATE())` | "
+        "nulls: `ISNULL(col, 0)` | identifiers: `[col name]` | "
+        "date parts: `YEAR(col)`, `MONTH(col)`, `DATEPART(quarter, col)` | "
+        "arithmetic: `DATEDIFF(day, start, end)`, `DATEADD(day, -7, GETDATE())`"
+    ),
+    "POSTGRESQL": (
+        "**SQL dialect: PostgreSQL** — "
+        "row limit: `LIMIT N` | dates: `NOW()`, `CURRENT_DATE` | "
+        "nulls: `COALESCE(col, 0)` | identifiers: `\"col name\"` | "
+        "date parts: `EXTRACT(year FROM col)`, `DATE_TRUNC('month', col)`"
+    ),
+    "MYSQL": (
+        "**SQL dialect: MySQL** — "
+        "row limit: `LIMIT N` | dates: `NOW()`, `CURDATE()` | "
+        "nulls: `IFNULL(col, 0)` | identifiers: `` `col name` `` | "
+        "date parts: `YEAR(col)`, `MONTH(col)`"
+    ),
+}
+
+
+def _dialect_hint(db_type: str) -> str:
+    return _DIALECT_HINTS.get(db_type.upper(), f"**SQL dialect: {db_type}**")
+
+
 def _format_table(rows: list[dict], max_rows: int = 100) -> tuple[str, int, list[str]]:
     """Format list-of-dicts as a readable text table. Returns (text, row_count, columns)."""
     if not rows:
@@ -110,10 +137,12 @@ def _resolve_source(registry, source_name: str):
 class ListTablesTool(BaseTool):
     name        = "list_tables"
     description = (
-        "List all tables with descriptions and row counts. "
-        "You usually don't need this — the Business Context in your prompt already describes all tables. "
-        "Only call this if the Business Context doesn't cover the tables you're looking for, "
-        "or if the user explicitly asks what tables exist."
+        "Orient yourself to the database. Returns in one response: "
+        "(1) the SQL dialect to use, "
+        "(2) every table with its type (transaction/reference/etc.), description, and row count, "
+        "(3) the complete relationship map — which tables join to which and the exact column names. "
+        "Call this FIRST at the start of every question to plan your approach. "
+        "After this call you know what tables exist, how they relate, and what SQL syntax to use."
     )
     parameters  = {
         "type": "object",
@@ -121,10 +150,6 @@ class ListTablesTool(BaseTool):
             "source": {
                 "type": "string",
                 "description": "Data source name. Omit if only one source is connected.",
-            },
-            "filter": {
-                "type": "string",
-                "description": "Optional keyword to filter results by table name or description",
             },
         },
         "required": [],
@@ -135,7 +160,6 @@ class ListTablesTool(BaseTool):
 
     async def execute(self, input: dict) -> ToolResult:
         source_name = (input.get("source") or "").strip()
-        filter_kw   = (input.get("filter") or "").lower().strip()
 
         source, err = _resolve_source(self._registry, source_name)
         if err:
@@ -152,16 +176,25 @@ class ListTablesTool(BaseTool):
                 is_error=True,
             )
 
-        lines = [l for l in index.splitlines() if l.strip()]
-        if filter_kw:
-            lines = [l for l in lines if filter_kw in l.lower()]
+        db_type = source.get_db_type().upper()
+        dialect_hint = _dialect_hint(db_type)
 
-        header = (
-            f"Source: **{source.name}** — use this name in execute_sql and get_table_schema calls\n"
-            f"Database: {source.get_database_name()}  |  Type: {source.get_db_type().upper()}\n\n"
-        )
-        body = "\n".join(lines) if lines else "(no tables match filter)"
-        return ToolResult(tool_call_id="", content=header + body)
+        sections = [
+            f"## Database: {source.get_database_name()}  |  Source: `{source.name}`  |  Type: {db_type}",
+            "",
+            dialect_hint,
+            "",
+            "## Tables",
+            "",
+            index.strip(),
+        ]
+
+        # Append relationship map if available
+        rels = source.get_relationships()
+        if rels:
+            sections += ["", "## Relationships", "", rels.strip()]
+
+        return ToolResult(tool_call_id="", content="\n".join(sections))
 
 
 class GetTableSchemaTool(BaseTool):
@@ -313,6 +346,47 @@ class ExecuteSQLTool(BaseTool):
             )
 
 
+class GetRelationshipsTool(BaseTool):
+    name        = "get_relationships"
+    description = (
+        "Get the complete relationship map for a database: which tables join to which, "
+        "the exact column names to use in JOIN conditions, and common multi-table join paths. "
+        "Call this BEFORE writing any SQL that joins two or more tables. "
+        "Do not guess join columns from column names — use this tool to get confirmed or "
+        "inferred join conditions."
+    )
+    parameters  = {
+        "type": "object",
+        "properties": {
+            "source": {
+                "type": "string",
+                "description": "Data source name. Omit if only one source is connected.",
+            },
+        },
+        "required": [],
+    }
+
+    def __init__(self, source_registry):
+        self._registry = source_registry
+
+    async def execute(self, input: dict) -> ToolResult:
+        source_name = (input.get("source") or "").strip()
+        source, err = _resolve_source(self._registry, source_name)
+        if err:
+            return ToolResult(tool_call_id="", content=err, is_error=True)
+
+        rels = source.get_relationships()
+        if not rels:
+            return ToolResult(
+                tool_call_id="",
+                content=(
+                    "No relationships file found for this source. "
+                    "Run Setup → Discover Schema to generate it."
+                ),
+            )
+        return ToolResult(tool_call_id="", content=rels)
+
+
 class GetBusinessContextTool(BaseTool):
     name        = "get_business_context"
     description = (
@@ -360,7 +434,7 @@ class GetBusinessContextTool(BaseTool):
 # ── Factory ────────────────────────────────────────────────────────────────────
 
 def create_database_tools(source_registry) -> list[BaseTool]:
-    """Return the four database tools wired to the given SourceRegistry."""
+    """Return all database tools wired to the given SourceRegistry."""
     return [
         ListTablesTool(source_registry),
         GetTableSchemaTool(source_registry),

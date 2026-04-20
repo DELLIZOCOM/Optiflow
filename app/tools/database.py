@@ -85,6 +85,24 @@ def _format_table(rows: list[dict], max_rows: int = 100) -> tuple[str, int, list
     return f"{header}\n{sep}\n{body}{note}", count, cols
 
 
+def _json_safe(v):
+    """Coerce a DB value into something JSON.dumps handles without `default=str`.
+
+    Keeps numbers and booleans as-is so the frontend can plot them; turns
+    dates / decimals / bytes into strings.
+    """
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return v
+    try:
+        import decimal
+        if isinstance(v, decimal.Decimal):
+            # Decimals plot fine as floats; keep precision reasonable.
+            return float(v)
+    except Exception:
+        pass
+    return str(v)
+
+
 def _build_structured_result(rows: list[dict], max_preview: int = 20) -> dict:
     if not rows:
         return {
@@ -322,6 +340,16 @@ class ExecuteSQLTool(BaseTool):
                 "RESULT JSON\n"
                 f"{json.dumps(structured, default=str, ensure_ascii=False)}"
             )
+            # Keep a chart-ready slice of the rows in metadata so the
+            # orchestrator can attach them verbatim to a chart event
+            # without the LLM re-serializing (and thus potentially
+            # hallucinating) any numbers. Cap at 200 rows — charts with
+            # more than that are unreadable anyway.
+            _CHART_ROW_CAP = 200
+            rows_for_chart = [
+                {k: _json_safe(v) for k, v in r.items()}
+                for r in rows[:_CHART_ROW_CAP]
+            ]
             return ToolResult(
                 tool_call_id="",
                 content=content,
@@ -330,6 +358,8 @@ class ExecuteSQLTool(BaseTool):
                     "columns": columns,
                     "explanation": explanation,
                     "structured": structured,
+                    "rows_for_chart": rows_for_chart,
+                    "rows_truncated": row_count > _CHART_ROW_CAP,
                 },
             )
         except Exception as exc:

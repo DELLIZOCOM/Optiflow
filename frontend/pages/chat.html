@@ -7,29 +7,89 @@
   <title>OptiFlow AI</title>
   <link rel="stylesheet" href="/static/css/chat.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 
 <body>
 
-  <div class="header">
-    <div class="header-left">
-      <h1>OptiFlow AI</h1>
-      <p>Database Intelligence</p>
+  <aside class="sidebar" id="sidebar" aria-label="Conversations">
+    <div class="sidebar-header">
+      <button class="sidebar-new" id="newChatBtn" onclick="newChat()" title="Start a new conversation">
+        <span class="plus" aria-hidden="true">+</span>
+        <span>New chat</span>
+      </button>
+      <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" title="Hide sidebar" aria-label="Toggle sidebar">
+        <span aria-hidden="true">&#x276E;</span>
+      </button>
     </div>
-    <div class="header-right">
-      <button id="clearChatBtn" onclick="clearChat()" title="Clear chat history and start a new conversation">&#128172; Clear Chat</button>
-      <button id="resetBtn" onclick="resetData()" title="Clear all data and restart setup">&#8635; New Company</button>
+
+    <div class="sidebar-search">
+      <input type="text" id="sessionSearch" placeholder="Search conversations…" aria-label="Search conversations">
     </div>
+
+    <nav class="session-list" id="sessionList" aria-label="Past conversations"></nav>
+
+    <div class="sidebar-footer">
+      <span id="sessionCount">0 conversations</span>
+    </div>
+  </aside>
+
+  <div class="app-main">
+
+    <header class="header">
+      <div class="header-left">
+        <button class="hdr-btn icon-only" id="openSidebarBtn" onclick="toggleSidebar()" title="Show conversations" aria-label="Show conversations">
+          <span aria-hidden="true">&#9776;</span>
+        </button>
+        <div class="header-text">
+          <h1>OptiFlow AI</h1>
+          <span class="subtitle" id="activeChatTitle">Database Intelligence</span>
+        </div>
+        <span class="session-pill status-idle" id="sessionPill" title="Agent status">
+          <span class="dot"></span>
+          <span class="label" id="sessionPillLabel">Ready</span>
+        </span>
+      </div>
+
+      <div class="header-right">
+        <button class="hdr-btn danger" id="resetBtn" onclick="resetData()" title="Clear all data and restart setup">
+          <span>&#8635;</span><span class="label">Reset</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="chat-area" id="chatArea" role="log" aria-live="polite" aria-label="Chat messages">
+      <div class="chat-inner" id="chatInner"></div>
+    </main>
+
+    <div class="input-wrap">
+      <div class="input-bar">
+        <textarea id="questionInput" rows="1" placeholder="Ask anything about your data…" aria-label="Ask a question"></textarea>
+        <div class="input-actions">
+          <div class="mode-toggle" role="tablist" aria-label="Response format">
+            <button type="button" class="mode-option active" id="modeText"
+                    role="tab" aria-selected="true"
+                    onclick="setMode('text')" title="Plain-text answer">
+              <span class="mode-icon" aria-hidden="true">&para;</span>
+              <span class="mode-label">Text</span>
+            </button>
+            <button type="button" class="mode-option" id="modeChart"
+                    role="tab" aria-selected="false"
+                    onclick="setMode('chart')" title="Show the answer as a chart with a short explanation">
+              <span class="mode-icon" aria-hidden="true">&#9638;</span>
+              <span class="mode-label">Chart</span>
+            </button>
+          </div>
+          <button id="sendBtn" class="send-btn" onclick="sendOrStop()" aria-label="Send">
+            <span id="sendBtnLabel">Send</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
   </div>
 
-  <div class="chat-area" id="chatArea">
-  </div>
-
-  <div class="input-bar">
-    <input type="text" id="questionInput" placeholder="Ask anything about your data..."
-      onkeydown="if(event.key==='Enter') sendFromInput()">
-    <button id="sendBtn" onclick="sendFromInput()">Send</button>
-  </div>
+  <div class="sidebar-scrim" id="sidebarScrim" onclick="closeSidebar()" aria-hidden="true"></div>
 
   <script src="/static/js/chat.js"></script>
 </body>

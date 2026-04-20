@@ -59,7 +59,7 @@ Then give your final answer.
 
 **Typical flow: list_tables → get_table_schema → execute_sql → answer (4 iterations)**
 
-**Before each tool call, write a `<thinking>` block** describing your reasoning.
+**Always begin your response with a `<thinking>` block** describing your reasoning before any tool call or final answer. This is mandatory on every turn.
 
 Example — "how many projects in root?":
 

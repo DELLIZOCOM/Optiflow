@@ -1512,4 +1512,115 @@ rm -f data/knowledge/company.md
 
 ---
 
-*Last updated: April 2026*
+---
+
+## 19. Recent Changes (April 2026)
+
+A log of material changes made in the April 2026 hardening pass. These are implemented and live, not proposals.
+
+### 19.1 Context pruning — `_strip_tool_blocks`
+
+**Problem:** every turn persisted the full `tool_use` / `tool_result` chain to `SessionStore`. By turn 5 the LLM was replaying 100+ KB of old SQL results on every request, causing 1–2 minute latency and inflated token bills.
+
+**Fix:** `app/agent/orchestrator.py:_strip_tool_blocks()` is now the single persistence gate. It keeps only user strings and flattened assistant text; every save path (happy, error, rate-limit, force-final) routes through it. Legacy sessions are also stripped on load, so old bloat self-heals.
+
+### 19.2 True token streaming — `AIClient.complete_stream`
+
+**Problem:** the orchestrator was using `messages.create` (blocking) and buffering the whole response before emitting anything to the UI. The user stared at a static "Thinking…" bubble for 15–30s.
+
+**Fix:** new async generator `AIClient.complete_stream()` wraps `client.messages.stream()`, yielding:
+
+| Event | When |
+|-------|------|
+| `text_delta` | Each text chunk from the model |
+| `tool_use_start` | Model begins a tool call |
+| `rate_limit_wait` | 429 received, before retry |
+| `rate_limit_tick` | 1 Hz countdown during the wait |
+| `rate_limit_resume` | Wait done, retrying |
+| `final_message` | Stream finished; full message object |
+
+The dead non-streaming `AIClient.complete()` method was removed.
+
+### 19.3 Tag-safe thinking stream — `_ThinkingStripper`
+
+The model writes `<thinking>…</thinking>` in its text stream. We strip those tags before emitting to the UI, but chunks don't respect tag boundaries (`<thin` can end one chunk, `king>` the next). `_ThinkingStripper.feed()` holds back a partial-tag suffix until the next chunk arrives, so the client never sees half a tag.
+
+Fresh stripper instances are created on `rate_limit_resume` so the retried stream starts clean.
+
+### 19.4 Rate-limit handling — user-visible wait
+
+**Problem:** the Anthropic SDK's default `max_retries=2` silently retried 429s for up to 20 seconds. The UI showed nothing; the user assumed the app was frozen.
+
+**Fix:**
+- `AsyncAnthropic(api_key=..., max_retries=0)` — disable silent retries.
+- Custom retry loop in `complete_stream()` emits `rate_limit_wait` → `rate_limit_tick` (1 Hz) → `rate_limit_resume`, up to 3 attempts, capped at 90s per wait.
+- Proactive throttle in `_async_record_call()` reads `anthropic-ratelimit-requests-remaining` from the last response. When the bucket is nearly empty it spaces the next call by 1–4s, which prevents most 429s before they happen.
+- Frontend renders an inline banner inside the trace panel with a countdown, attempt counter, and shrinking progress bar.
+
+### 19.5 Dead code + redundant gates
+
+- Removed the 100ms gap check in the orchestrator — `AIClient._MIN_CALL_GAP_S` already enforces a stricter gate.
+- Dropped `_MIN_CALL_GAP_S` from 0.5s to 0.2s (≈1.2s saved on a typical 4-iteration question).
+- Removed unused `complete()` non-streaming method (~70 lines).
+
+### 19.6 `company.md` cached in memory
+
+`_build_system_prompt()` used to re-read `data/knowledge/company.md` from disk on every question. Now cached in module-level `_COMPANY_MD_CACHE` with mtime invalidation — edits to the file still take effect without restart, but normal requests skip the read.
+
+### 19.7 Follow-up hint trimmed
+
+**Before:** every follow-up question appended a 300-token system note telling the model to skip `list_tables` and always write `<thinking>`.
+
+**After:** the full hint fires only on turn 2 (exactly one prior turn). Turns 3+ get a one-line reminder. The model carries the behavior forward from context after that.
+
+### 19.8 Duplicate `<thinking>` instruction collapsed
+
+`SYSTEM_PROMPT` and the follow-up hint both used to tell the model to write `<thinking>`. Now consolidated into a single clear rule in the system prompt.
+
+### 19.9 `force_final` empty-answer fix
+
+**Problem:** when the agent ran near the iteration limit, tools were disabled to force a final answer. The system prompt still said "always begin with `<thinking>`", so the model sometimes wrapped its entire answer inside `<thinking>…</thinking>`. The stripper removed it and the user saw an empty bubble ("No answer.").
+
+**Fix (two-layer):**
+1. On `force_final`, the system prompt is augmented with a **FINAL ANSWER MODE** section that explicitly forbids `<thinking>` and tool calls, and requires direct prose.
+2. **Fail loud:** if the stream still ends with `stop_reason=end_turn` and no text, the orchestrator rolls back the turn and emits an `error` event with a user-facing "agent finished without producing an answer" message and a Retry button — no more silent empty bubbles.
+
+Contract: **correct answer or an explicit error** — never a blank response.
+
+### 19.10 Frontend revamp (chat.html / chat.css / chat.js)
+
+- **Wider chat area** — `.chat-inner` capped at 1120px (was 900px); bubble `max-width` raised to 94%.
+- **Larger typography** — base font 14px → 15px, AI message line-height 1.65 → 1.7, headings scaled up (h1 17→20, h2 15→17).
+- **Better output rendering** — markdown tables get zebra striping, hover highlight, stronger header row; blockquotes use a 4px accent rail with filled background.
+- **Trace panel improvements:**
+  - Body capped at 240px — streaming thinking can't push the input bar off-screen.
+  - `scrollTraceBottom(panel)` helper auto-scrolls *inside* the trace body (not the whole page) as text streams in, but only if the user is already near the bottom — if they've scrolled up to read an earlier step, their position is preserved.
+  - Panel auto-collapses when the answer arrives; click "Show" to re-expand.
+- **Removed** the "OF" header logo and the Enter/Shift+Enter/Esc keyboard-hint strip.
+- **Session pill** with idle/running/error states and a pulse animation on "running".
+- **Copy button** on AI messages; timestamps + query/step count badges.
+- **Empty state** with sample-question chips.
+- **Error messages** get a Retry button that re-sends the original question.
+- **`sessionStorage` history key** bumped to `optiflow_chat_history_v3` for schema invalidation.
+
+### 19.11 Orchestrator constants
+
+| Constant | Value |
+|----------|-------|
+| `_MAX_ITERATIONS` | 15 (force_final triggers at iter 13) |
+| `_MIN_CALL_GAP_S` | 0.2s |
+| `_MAX_CALLS_PER_MIN` | 15 |
+| Rate-limit retry cap | 3 attempts, 90s max wait per attempt |
+
+### 19.12 Files touched in this pass
+
+- `app/agent/orchestrator.py` — context pruning, streaming loop, force_final fix, fail-loud on empty answer, company.md cache, trimmed follow-up hint
+- `app/agent/prompts.py` — consolidated `<thinking>` instruction
+- `app/ai/client.py` — `complete_stream()`, `RateLimitExhausted`, proactive throttle, removed dead `complete()`
+- `frontend/pages/chat.html` — removed logo + keyboard hints
+- `frontend/css/chat.css` — full visual refresh (see §19.10)
+- `frontend/js/chat.js` — streaming thinking, rate-limit banner, trace-body scroll, retry button, empty state
+
+---
+
+*Last updated: 2026-04-17*

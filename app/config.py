@@ -97,6 +97,16 @@ def save_ai_config(data: dict) -> None:
     os.makedirs(CONFIG_DIR, exist_ok=True)
     with open(APP_CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
+
+    # Cached rate-limit headers belong to the old key. Clear them so the
+    # next request doesn't wait based on another account's bucket state.
+    try:
+        from app.ai.client import _rl_headers
+        for k in list(_rl_headers.keys()):
+            _rl_headers[k] = None
+    except Exception:
+        pass
+
     logger.info("AI config saved to data/config/app.json")
 
 

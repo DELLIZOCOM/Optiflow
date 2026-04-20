@@ -1,7 +1,7 @@
 {
   "cloud_provider": {
     "provider": "anthropic",
-    "api_key": "gAAAAABp4MCAjOblhio9Fj9YraTIglMj_bOk0LbDVFlJu8GoQhJfpsB2tZHOSbohw29JTWjGlWw4uogPh6G54coW-eC1JRbSNdXX62xznHgOsS2biey5EJdLooG5nkYLCLT6h5yBLxnZFTt8X1hByC5666OyoEM8sKMlZWh-MgzQlwoN7Qv9nJkFmCNiUFy9AS1cDt7YIp7DooWpvUAmlGfR-s5x5oGKMg==",
+    "api_key": "gAAAAABp4xFxJkHiNQPme2zhgpk16PlgeT0KAqoDtU5YHB4v5gKUn03bX0TI95bJzZkJFgQTjGCeBcQDiopcDS4jlcOVvno_Sn3q-OwD3lJhkoJ2AyL3FBPesq_XK4B1Mzw5typYZcK9H6azc3ZBEl0Fd25Rv6yLjRZQX7Z6ajD_odeF9HIWhIBzrRZkjH_IU220s1xVjtJ8O3uWJCtS8w95-imbxFm9gw==",
     "api_key_hint": "kwAA",
     "model": "claude-sonnet-4-20250514"
   },

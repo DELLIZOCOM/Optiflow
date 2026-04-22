@@ -11,6 +11,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,11 @@ APP_CONFIG_PATH    = CONFIG_DIR / "app.json"
 _LEGACY_AI_PATH    = CONFIG_DIR / "model_config.json"  # backward compat
 COMPANY_MD_PATH    = KNOWLEDGE_DIR / "company.md"
 SECURITY_PATH      = CONFIG_DIR / "security.json"
+
+# Email integration — one Outlook tenant per install (admin-consent)
+EMAIL_CONFIG_DIR   = CONFIG_DIR / "email"
+OUTLOOK_CONFIG_PATH = EMAIL_CONFIG_DIR / "outlook.json"
+EMAIL_DB_PATH      = CACHE_DIR / "email.db"
 
 
 # ── AI config ─────────────────────────────────────────────────────────────────
@@ -154,6 +160,74 @@ def delete_source_config(name: str) -> None:
     if path.exists():
         path.unlink()
         logger.info(f"Source config deleted: {name}")
+
+
+# ── Email (Outlook admin-consent) credentials ─────────────────────────────────
+
+def load_outlook_config() -> Optional[dict]:
+    """
+    Load Outlook admin-consent credentials. Returns a dict with
+    {tenant_id, client_id, client_secret, tenant_display_name, added_at,
+    added_by, backfill_days} or None if not configured. client_secret is
+    returned decrypted.
+    """
+    if not OUTLOOK_CONFIG_PATH.exists():
+        return None
+    from app.utils.crypto import decrypt_secret
+    try:
+        with open(OUTLOOK_CONFIG_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as e:
+        logger.warning(f"Could not load outlook.json: {e}")
+        return None
+    enc = raw.get("client_secret", "")
+    return {
+        "tenant_id":           raw.get("tenant_id", ""),
+        "client_id":           raw.get("client_id", ""),
+        "client_secret":       decrypt_secret(enc) if enc else "",
+        "tenant_display_name": raw.get("tenant_display_name", ""),
+        "added_at":            raw.get("added_at", 0),
+        "added_by":            raw.get("added_by", ""),
+        "backfill_days":       int(raw.get("backfill_days", 365)),
+    }
+
+
+def save_outlook_config(data: dict) -> None:
+    """Persist Outlook credentials; client_secret Fernet-encrypted at rest."""
+    from app.utils.crypto import encrypt_secret, is_encrypted
+    import time as _time
+    secret = data.get("client_secret", "")
+    if secret and not is_encrypted(secret):
+        secret = encrypt_secret(secret)
+    cfg = {
+        "tenant_id":           data.get("tenant_id", "").strip(),
+        "client_id":           data.get("client_id", "").strip(),
+        "client_secret":       secret,
+        "tenant_display_name": data.get("tenant_display_name", "").strip(),
+        "added_at":            data.get("added_at") or _time.time(),
+        "added_by":            data.get("added_by", ""),
+        "backfill_days":       int(data.get("backfill_days", 365)),
+    }
+    os.makedirs(EMAIL_CONFIG_DIR, exist_ok=True)
+    with open(OUTLOOK_CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+    try:
+        os.chmod(OUTLOOK_CONFIG_PATH, 0o600)
+    except OSError:
+        pass
+    logger.info("Outlook config saved to data/config/email/outlook.json")
+
+
+def delete_outlook_config() -> None:
+    """Remove the Outlook credentials file. Does NOT touch email.db."""
+    if OUTLOOK_CONFIG_PATH.exists():
+        OUTLOOK_CONFIG_PATH.unlink()
+        logger.info("Outlook config deleted")
+
+
+def is_email_configured() -> bool:
+    cfg = load_outlook_config()
+    return bool(cfg and cfg.get("tenant_id") and cfg.get("client_id") and cfg.get("client_secret"))
 
 
 def is_ai_configured() -> bool:

@@ -44,6 +44,71 @@ _tool_registry:   ToolRegistry   = ToolRegistry()
 _sessions:        SessionStore   = SessionStore()
 _orchestrator:    AgentOrchestrator | None = None
 
+# Lazy singleton — instantiated on first request for an email source.
+# Isolated from sessions.db so its retention + vacuum schedule is its own.
+_email_store = None
+
+
+def _get_email_store():
+    """Return the process-wide EmailStore, creating it on first use."""
+    global _email_store
+    if _email_store is None:
+        from app.config import EMAIL_DB_PATH
+        from app.sources.email.store import EmailStore
+        _email_store = EmailStore(EMAIL_DB_PATH)
+    return _email_store
+
+
+async def install_email_source(source) -> None:
+    """
+    Register an EmailSource into the live registries and begin ingestion.
+    Also registers the 4 email tools (only once — a second call is a no-op
+    because ToolRegistry.register overwrites by name).
+    """
+    from app.tools.email import register_email_tools
+    _source_registry.register(source)
+    register_email_tools(_tool_registry, source.store)
+    await source.start()
+    logger.info(f"Email source '{source.name}' installed and ingestion started")
+
+
+async def _maybe_start_email_source() -> None:
+    """
+    On startup, check for a persisted Outlook config. If present, instantiate
+    the OutlookSource and kick off ingestion. Silent no-op if not configured.
+    """
+    from app.config import load_outlook_config
+    cfg = load_outlook_config()
+    if not cfg or not cfg.get("client_id"):
+        return
+    from app.sources.email.outlook.auth import OutlookCredentials
+    from app.sources.email.outlook.source import OutlookSource
+    source = OutlookSource(
+        name="outlook",
+        tenant_display_name=cfg.get("tenant_display_name") or "Company Email",
+        credentials=OutlookCredentials(
+            tenant_id=cfg["tenant_id"],
+            client_id=cfg["client_id"],
+            client_secret=cfg["client_secret"],
+        ),
+        store=_get_email_store(),
+        backfill_days=cfg.get("backfill_days", 365),
+    )
+    await install_email_source(source)
+
+
+async def uninstall_email_source(name: str) -> None:
+    """Stop ingestion and remove from the source registry. Leaves cache intact."""
+    src = _source_registry.get(name)
+    if src is None:
+        return
+    try:
+        await src.stop()
+    except Exception:
+        logger.exception(f"Error while stopping email source '{name}'")
+    _source_registry.remove(name)
+    logger.info(f"Email source '{name}' uninstalled")
+
 
 def _instantiate_source(config: dict):
     """Create the right DataSource subclass from a source config dict."""
@@ -118,6 +183,16 @@ def create_app() -> FastAPI:
     from app.routes.sources import router as sources_router, init_router as sources_init
     app.include_router(sources_router)
 
+    # Email integration routes (Outlook admin-consent setup + status)
+    from app.routes.email import create_email_router
+    app.include_router(create_email_router(
+        source_registry   = _source_registry,
+        tool_registry     = _tool_registry,
+        get_or_create_store = _get_email_store,
+        install_source    = install_email_source,
+        uninstall_source  = uninstall_email_source,
+    ))
+
     @app.on_event("startup")
     async def _startup():
         global _orchestrator
@@ -143,6 +218,12 @@ def create_app() -> FastAPI:
         # 5. Register agent router now that orchestrator is ready
         from app.routes.agent import create_agent_router
         app.include_router(create_agent_router(_orchestrator))
+
+        # 6. If email is already configured, bring the source up
+        try:
+            await _maybe_start_email_source()
+        except Exception:
+            logger.exception("Failed to auto-start email source on boot")
 
         sources = _source_registry.get_all()
         if not sources:

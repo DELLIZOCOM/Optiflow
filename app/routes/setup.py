@@ -79,6 +79,18 @@ def _reload_source(config: dict, warm_cache: bool = True) -> None:
                 source.load_cache()
             except Exception as exc:
                 logger.warning(f"Schema cache warm failed for '{name}': {exc}")
+        # Ensure the database tools (list_tables / get_table_schema /
+        # execute_sql / get_business_context / render_chart) are present in
+        # the tool registry. After /setup/reset clears the registry, only
+        # email tools get re-added on email reconnect, so without this call
+        # a freshly-added DB source would advertise itself in the system
+        # prompt without any tools to actually query it.
+        if _tool_registry is not None:
+            try:
+                from app.main import register_core_tools
+                register_core_tools(_tool_registry, _source_registry)
+            except Exception:
+                logger.exception("Failed to (re-)register core tools after source add")
         logger.info(f"Source '{name}' loaded into registry")
     except Exception as e:
         logger.error(f"Failed to load source '{name}': {e}")
@@ -607,12 +619,21 @@ async def setup_reset():
             except Exception:
                 pass
 
-    # 8. Clear in-memory ToolRegistry
+    # 8. Clear in-memory ToolRegistry, then immediately re-seed the core
+    #    tools (database + chart). This way the registry is never empty
+    #    in the window between reset and the next source-add — and if the
+    #    user reconnects email before adding a database, the eventual
+    #    database add still has its tools waiting.
     if _tool_registry:
         try:
             _tool_registry.clear()
         except Exception:
             pass
+        try:
+            from app.main import register_core_tools
+            register_core_tools(_tool_registry, _source_registry)
+        except Exception:
+            logger.exception("Failed to re-seed core tools after reset")
 
     # 9. Clear all active sessions
     if _sessions:

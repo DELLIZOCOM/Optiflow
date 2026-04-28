@@ -5,3 +5,7 @@ anthropic==0.92.0
 openai==2.31.0
 cryptography==46.0.7
 requests==2.33.1
+
+# Email integration (Outlook admin-consent)
+msal==1.34.0
+httpx==0.28.1

@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OptiFlow AI — Email</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/setup.css?v=mgmt1">
+  <link rel="stylesheet" href="/static/css/email.css?v=mgmt1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-inner">
+      <div>
+        <h1>OptiFlow AI — Email</h1>
+        <p>Connect company email (Microsoft 365 / GoDaddy / generic IMAP) so the agent can answer email questions.</p>
+      </div>
+      <a href="/" class="header-home" title="Back to chat">← Back to chat</a>
+    </div>
+  </div>
+
+  <div class="wizard-wrap">
+    <div class="wizard">
+
+      <!-- ── Top status bar ──────────────────────────────────────────────── -->
+      <div class="email-status-bar" id="email-top-status">
+        <div class="email-status-left">
+          <span class="status-dot" id="status-dot"></span>
+          <span id="status-label">Loading status…</span>
+          <span class="status-cadence" id="status-cadence"></span>
+        </div>
+        <div class="email-status-right">
+          <button class="btn btn-ghost btn-sm" id="btn-sync-now" onclick="syncNow()" style="display:none;">Sync now</button>
+          <button class="btn btn-ghost btn-sm" onclick="refreshStatus()">Refresh</button>
+        </div>
+      </div>
+
+      <!-- ── Not-configured / reconfigure: connect form ──────────────────── -->
+      <div class="panel" id="panel-connect" style="display:none;">
+        <div class="panel-title">Connect company email</div>
+        <div class="panel-subtitle">
+          Pick the provider that matches how your company hosts email.
+        </div>
+
+        <!-- Provider picker -->
+        <div class="provider-picker" id="email-provider-picker">
+          <label class="provider-card" data-provider="outlook">
+            <input type="radio" name="email-provider" value="outlook">
+            <div class="provider-card-body">
+              <div class="provider-card-title">Microsoft 365 / Outlook</div>
+              <div class="provider-card-sub">Exchange Online tenants. Admin-consent Azure AD app (Microsoft Graph).</div>
+            </div>
+          </label>
+          <label class="provider-card" data-provider="godaddy">
+            <input type="radio" name="email-provider" value="godaddy">
+            <div class="provider-card-body">
+              <div class="provider-card-title">GoDaddy Workspace Email</div>
+              <div class="provider-card-sub">GoDaddy's standard mailbox product (not the M365 plan). IMAP + password.</div>
+            </div>
+          </label>
+          <label class="provider-card" data-provider="generic">
+            <input type="radio" name="email-provider" value="generic">
+            <div class="provider-card-body">
+              <div class="provider-card-title">Generic IMAP</div>
+              <div class="provider-card-sub">Zoho, FastMail, cPanel, on-prem Postfix/Dovecot. You supply host + port.</div>
+            </div>
+          </label>
+        </div>
+
+        <!-- Common: display name + backfill -->
+        <div id="email-common-fields" style="display:none;">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="inp-email-display">Display name</label>
+              <input type="text" id="inp-email-display" placeholder="Acme Corp Email" autocomplete="off">
+              <div class="field-hint">Shown in the sidebar. Anything recognizable to your team.</div>
+            </div>
+            <div class="form-group">
+              <label for="inp-email-backfill">Backfill window</label>
+              <select id="inp-email-backfill">
+                <option value="30">Last 30 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="365" selected>Last 1 year</option>
+                <option value="730">Last 2 years</option>
+                <option value="1825">Last 5 years</option>
+              </select>
+              <div class="field-hint">How far back to pull on initial sync.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Outlook (Graph) subform -->
+        <div id="email-outlook-form" style="display:none;">
+          <div class="info-box">
+            <div class="info-box-title">Before you connect (Azure AD)</div>
+            <ol class="info-box-list">
+              <li>In <a href="https://portal.azure.com/" target="_blank" rel="noopener">Azure Portal</a> → <em>App registrations</em>, register a new application.</li>
+              <li>Under <em>API permissions</em>, add <code>Microsoft Graph → Application → Mail.Read</code> and <code>User.Read.All</code>, then click <strong>Grant admin consent</strong>.</li>
+              <li>Under <em>Certificates &amp; secrets</em>, create a new client secret and copy the <strong>Value</strong>.</li>
+              <li>Paste the Tenant ID, Client ID, and Client Secret below.</li>
+            </ol>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="inp-email-tenant">Tenant ID</label>
+              <input type="text" id="inp-email-tenant" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="form-group">
+              <label for="inp-email-client">Client ID</label>
+              <input type="text" id="inp-email-client" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="inp-email-secret">Client Secret</label>
+              <input type="password" id="inp-email-secret" placeholder="The secret Value (not Secret ID)" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="form-group"><!-- spacer --></div>
+          </div>
+        </div>
+
+        <!-- IMAP subform (GoDaddy / generic) -->
+        <div id="email-imap-form" style="display:none;">
+          <div class="info-box" id="imap-godaddy-hint" style="display:none;">
+            <div class="info-box-title">GoDaddy Workspace Email</div>
+            <ol class="info-box-list">
+              <li>Server is preset to <code>imap.secureserver.net</code> on port 993 (SSL).</li>
+              <li>Add each company mailbox below using its full email address and password.</li>
+              <li>If your mailbox uses 2-factor login, generate an app-specific password in GoDaddy and use it here.</li>
+            </ol>
+          </div>
+          <div class="info-box" id="imap-generic-hint" style="display:none;">
+            <div class="info-box-title">Generic IMAP server</div>
+            <ol class="info-box-list">
+              <li>Find your provider's IMAP host and port (commonly <code>imap.&lt;domain&gt;.com</code> on 993 with TLS).</li>
+              <li>Use plain port 143 only on a trusted internal network.</li>
+              <li>Add one row below per mailbox you want indexed.</li>
+            </ol>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="inp-imap-host">IMAP host</label>
+              <input type="text" id="inp-imap-host" placeholder="imap.example.com" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="form-group" style="max-width:140px;">
+              <label for="inp-imap-port">Port</label>
+              <input type="number" id="inp-imap-port" value="993" min="1" max="65535">
+            </div>
+            <div class="form-group" style="max-width:160px;">
+              <label for="inp-imap-ssl">Encryption</label>
+              <select id="inp-imap-ssl">
+                <option value="ssl" selected>SSL/TLS (recommended)</option>
+                <option value="plain">Plain (no encryption)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="mailbox-list-header">
+            <div class="mailbox-list-title">Mailboxes</div>
+            <button type="button" class="btn btn-ghost btn-small" id="btn-add-mailbox" onclick="addMailboxRow()">+ Add mailbox</button>
+          </div>
+          <div id="mailbox-rows"></div>
+          <div class="field-hint" style="margin-top:6px;">
+            Each row is one mailbox we'll log into and index. Folder defaults to <code>INBOX</code>.
+          </div>
+        </div>
+
+        <div class="status" id="email-form-status"></div>
+
+        <div class="btn-row">
+          <button class="btn btn-ghost" id="btn-cancel-reconfig" onclick="cancelReconfigure()" style="display:none;">Cancel</button>
+          <button class="btn btn-secondary" id="btn-email-test" onclick="testEmail()" disabled>Test credentials</button>
+          <div class="spacer"></div>
+          <button class="btn btn-primary" id="btn-email-save" onclick="saveEmail()" disabled>Connect</button>
+        </div>
+      </div>
+
+      <!-- ── Configured view: live dashboard ─────────────────────────────── -->
+      <div class="panel" id="panel-dashboard" style="display:none;">
+        <div class="dashboard-header">
+          <div>
+            <div class="panel-title" id="dash-title">Email</div>
+            <div class="panel-subtitle" id="dash-tenant">—</div>
+            <div class="panel-subtitle" id="dash-provider" style="margin-top:2px;"></div>
+          </div>
+          <div class="dashboard-actions">
+            <button class="btn btn-secondary" onclick="openReconfigure()">Reconfigure</button>
+            <button class="btn btn-danger" onclick="openDisconnect()">Disconnect</button>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-val" id="stat-mailboxes">—</div>
+            <div class="stat-lbl">Mailboxes</div>
+            <div class="stat-sub" id="stat-mailboxes-sub"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" id="stat-messages">—</div>
+            <div class="stat-lbl">Messages indexed</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" id="stat-synced">—</div>
+            <div class="stat-lbl">Initial sync complete</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" id="stat-last-sync">—</div>
+            <div class="stat-lbl">Last sync</div>
+          </div>
+        </div>
+
+        <!-- Mailbox management table ----------------------------------- -->
+        <div id="mailbox-table-section" style="display:none;">
+          <div class="section-header">
+            <div class="section-title">Mailboxes</div>
+            <button class="btn btn-ghost btn-small" id="btn-toggle-add-mailbox"
+                    onclick="toggleInlineAddMailbox()" style="display:none;">+ Add mailbox</button>
+          </div>
+
+          <!-- Inline add-mailbox form (IMAP only) -->
+          <div class="inline-add-mailbox" id="inline-add-mailbox" style="display:none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="add-mb-email">Email address</label>
+                <input type="email" id="add-mb-email" placeholder="user@company.com" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="form-group">
+                <label for="add-mb-pass">Password</label>
+                <input type="password" id="add-mb-pass" placeholder="password / app password" autocomplete="new-password">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="add-mb-display">Display name (optional)</label>
+                <input type="text" id="add-mb-display" placeholder="e.g. Sales inbox" autocomplete="off">
+              </div>
+              <div class="form-group" style="max-width:160px;">
+                <label for="add-mb-folder">Folder</label>
+                <input type="text" id="add-mb-folder" value="INBOX" autocomplete="off">
+              </div>
+            </div>
+            <div class="status" id="add-mb-status"></div>
+            <div class="btn-row">
+              <button class="btn btn-ghost" onclick="toggleInlineAddMailbox()">Cancel</button>
+              <div class="spacer"></div>
+              <button class="btn btn-primary" id="btn-confirm-add-mb" onclick="submitInlineAddMailbox()">Add mailbox</button>
+            </div>
+          </div>
+
+          <div class="mailbox-table" id="mailbox-table"></div>
+          <div class="field-hint" style="margin-top:8px;" id="mailbox-table-hint"></div>
+        </div>
+
+        <!-- Recent activity feed --------------------------------------- -->
+        <div id="activity-section" style="display:none;">
+          <div class="section-header">
+            <div class="section-title">Recent activity</div>
+            <span class="section-meta" id="activity-meta"></span>
+          </div>
+          <div class="activity-list" id="activity-list"></div>
+        </div>
+
+        <div id="errors-section" style="display:none;">
+          <div class="section-title">Mailboxes with errors</div>
+          <div class="error-list" id="error-list"></div>
+        </div>
+      </div>
+
+      <!-- ── Disconnect modal ────────────────────────────────────────────── -->
+      <div class="modal-scrim" id="modal-disconnect" style="display:none;" onclick="closeDisconnect(event)">
+        <div class="modal">
+          <div class="modal-title" id="modal-disconnect-title">Disconnect email?</div>
+          <div class="modal-body">
+            <p>Ingestion will stop and the agent will no longer see new email.</p>
+            <label class="checkbox-row">
+              <input type="checkbox" id="chk-wipe-cache">
+              <span>Also wipe the local email cache (irreversible — re-ingest takes hours).</span>
+            </label>
+            <div class="status" id="disconnect-status"></div>
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="closeDisconnect()">Cancel</button>
+            <div class="spacer"></div>
+            <button class="btn btn-danger" id="btn-confirm-disconnect" onclick="confirmDisconnect()">Disconnect</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Remove-mailbox modal ────────────────────────────────────────── -->
+      <div class="modal-scrim" id="modal-remove-mailbox" style="display:none;" onclick="closeRemoveMailbox(event)">
+        <div class="modal">
+          <div class="modal-title">Remove mailbox?</div>
+          <div class="modal-body">
+            <p>Stop polling <code id="rm-mb-email">—</code>. The mailbox will be marked disabled and the agent will no longer see new mail from it.</p>
+            <label class="checkbox-row">
+              <input type="checkbox" id="chk-purge-mb">
+              <span>Also delete the indexed messages for this mailbox (irreversible).</span>
+            </label>
+            <div class="status" id="rm-mb-status"></div>
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="closeRemoveMailbox()">Cancel</button>
+            <div class="spacer"></div>
+            <button class="btn btn-danger" id="btn-confirm-rm-mb" onclick="confirmRemoveMailbox()">Remove mailbox</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="/static/js/email.js?v=mgmt1"></script>
+</body>
+</html>

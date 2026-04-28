@@ -4,7 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OptiFlow AI — Setup</title>
-  <link rel="stylesheet" href="/static/css/setup.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/setup.css?v=polish1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
 </head>
 <body>
 
@@ -16,7 +22,7 @@
   <div class="wizard-wrap">
     <div class="wizard">
 
-      <!-- Step indicator (5 steps) -->
+      <!-- Step indicator (6 steps) -->
       <div class="step-bar">
         <div class="step-dot active" id="dot-1">
           <div class="step-circle">1</div>
@@ -36,6 +42,10 @@
         </div>
         <div class="step-dot" id="dot-5">
           <div class="step-circle">5</div>
+          <div class="step-label">Email</div>
+        </div>
+        <div class="step-dot" id="dot-6">
+          <div class="step-circle">6</div>
           <div class="step-label">Launch</div>
         </div>
       </div>
@@ -192,8 +202,153 @@
         </div>
       </div>
 
-      <!-- ── Step 5: Done ───────────────────────────────────────────────── -->
+      <!-- ── Step 5: Email (provider picker, optional) ──────────────────── -->
       <div class="panel hidden" id="panel-5">
+        <div class="panel-title">Connect company email (optional)</div>
+        <div class="panel-subtitle">
+          OptiFlow can read your team's mailboxes so you can ask questions about emails.
+          Pick the provider that matches how your company hosts email — you can skip this and
+          set it up later from the <code>Email</code> page.
+        </div>
+
+        <!-- Provider picker -->
+        <div class="provider-picker" id="email-provider-picker">
+          <label class="provider-card" data-provider="outlook">
+            <input type="radio" name="email-provider" value="outlook">
+            <div class="provider-card-body">
+              <div class="provider-card-title">Microsoft 365 / Outlook</div>
+              <div class="provider-card-sub">Exchange Online tenants. Admin-consent Azure AD app (Microsoft Graph).</div>
+            </div>
+          </label>
+          <label class="provider-card" data-provider="godaddy">
+            <input type="radio" name="email-provider" value="godaddy">
+            <div class="provider-card-body">
+              <div class="provider-card-title">GoDaddy Workspace Email</div>
+              <div class="provider-card-sub">GoDaddy's standard mailbox product (not the M365 plan). IMAP + password.</div>
+            </div>
+          </label>
+          <label class="provider-card" data-provider="generic">
+            <input type="radio" name="email-provider" value="generic">
+            <div class="provider-card-body">
+              <div class="provider-card-title">Generic IMAP</div>
+              <div class="provider-card-sub">Zoho, FastMail, cPanel, on-prem Postfix/Dovecot. You supply host + port.</div>
+            </div>
+          </label>
+        </div>
+
+        <!-- Common: display name + backfill (shown after a provider is picked) -->
+        <div id="email-common-fields" style="display:none;">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="inp-email-display">Display name</label>
+              <input type="text" id="inp-email-display" placeholder="Acme Corp Email" autocomplete="off">
+              <div class="field-hint">Shown in the sidebar. Anything recognizable to your team.</div>
+            </div>
+            <div class="form-group">
+              <label for="inp-email-backfill">Backfill window</label>
+              <select id="inp-email-backfill">
+                <option value="30">Last 30 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="365" selected>Last 1 year</option>
+                <option value="730">Last 2 years</option>
+                <option value="1825">Last 5 years</option>
+              </select>
+              <div class="field-hint">How far back to pull on initial sync.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Outlook (Graph) subform -->
+        <div id="email-outlook-form" style="display:none;">
+          <div class="info-box">
+            <div class="info-box-title">Before you continue (Azure AD)</div>
+            <ol class="info-box-list">
+              <li>In <a href="https://portal.azure.com/" target="_blank" rel="noopener">Azure Portal</a> → <em>App registrations</em>, register a new application.</li>
+              <li>Under <em>API permissions</em>, add <code>Microsoft Graph → Application → Mail.Read</code> and <code>User.Read.All</code>, then click <strong>Grant admin consent</strong>.</li>
+              <li>Under <em>Certificates &amp; secrets</em>, create a new client secret and copy the <strong>Value</strong>.</li>
+              <li>Paste the Tenant ID, Client ID, and Client Secret below.</li>
+            </ol>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="inp-email-tenant">Tenant ID</label>
+              <input type="text" id="inp-email-tenant" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="form-group">
+              <label for="inp-email-client">Client ID</label>
+              <input type="text" id="inp-email-client" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="inp-email-secret">Client Secret</label>
+              <input type="password" id="inp-email-secret" placeholder="The secret Value (not Secret ID)" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="form-group"><!-- spacer --></div>
+          </div>
+        </div>
+
+        <!-- IMAP (GoDaddy / generic) subform -->
+        <div id="email-imap-form" style="display:none;">
+          <div class="info-box" id="imap-godaddy-hint" style="display:none;">
+            <div class="info-box-title">GoDaddy Workspace Email</div>
+            <ol class="info-box-list">
+              <li>Server is preset to <code>imap.secureserver.net</code> on port 993 (SSL).</li>
+              <li>Add each company mailbox below using its full email address and password.</li>
+              <li>If your mailbox uses 2-factor login, generate an app-specific password in GoDaddy and use it here.</li>
+            </ol>
+          </div>
+          <div class="info-box" id="imap-generic-hint" style="display:none;">
+            <div class="info-box-title">Generic IMAP server</div>
+            <ol class="info-box-list">
+              <li>Find your provider's IMAP host and port (commonly <code>imap.&lt;domain&gt;.com</code> on 993 with TLS).</li>
+              <li>Use plain port 143 only on a trusted internal network.</li>
+              <li>Add one row below per mailbox you want indexed.</li>
+            </ol>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="inp-imap-host">IMAP host</label>
+              <input type="text" id="inp-imap-host" placeholder="imap.example.com" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="form-group" style="max-width:140px;">
+              <label for="inp-imap-port">Port</label>
+              <input type="number" id="inp-imap-port" value="993" min="1" max="65535">
+            </div>
+            <div class="form-group" style="max-width:160px;">
+              <label for="inp-imap-ssl">Encryption</label>
+              <select id="inp-imap-ssl">
+                <option value="ssl" selected>SSL/TLS (recommended)</option>
+                <option value="plain">Plain (no encryption)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="mailbox-list-header">
+            <div class="mailbox-list-title">Mailboxes</div>
+            <button type="button" class="btn btn-ghost btn-small" id="btn-add-mailbox" onclick="addMailboxRow()">+ Add mailbox</button>
+          </div>
+          <div id="mailbox-rows"></div>
+          <div class="field-hint" style="margin-top:6px;">
+            Each row is one mailbox we'll log into and index. Folder defaults to <code>INBOX</code>.
+          </div>
+        </div>
+
+        <div class="status" id="email-status"></div>
+
+        <div class="btn-row">
+          <button class="btn btn-ghost" onclick="goTo(4)">← Back</button>
+          <button class="btn btn-secondary" id="btn-email-test" onclick="testEmail()" disabled>Test credentials</button>
+          <button class="btn btn-ghost" id="btn-email-skip" onclick="goTo(6)">Skip for now</button>
+          <div class="spacer"></div>
+          <button class="btn btn-primary" id="btn-email-save" onclick="saveEmail()" disabled>Save &amp; continue →</button>
+        </div>
+      </div>
+
+      <!-- ── Step 6: Done ───────────────────────────────────────────────── -->
+      <div class="panel hidden" id="panel-6">
         <div class="done-icon">✓</div>
         <div class="panel-title" style="margin-bottom:8px;">You're all set</div>
         <div class="panel-subtitle" id="done-subtitle" style="margin-bottom:0;">OptiFlow is connected and ready.</div>
@@ -208,6 +363,6 @@
     </div>
   </div>
 
-  <script src="/static/js/setup.js"></script>
+  <script src="/static/js/setup.js?v=imap1"></script>
 </body>
 </html>

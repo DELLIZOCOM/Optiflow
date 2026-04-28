@@ -55,7 +55,25 @@ def init_router(source_registry, tool_registry, sessions=None):
 
 
 def _reload_source(config: dict, warm_cache: bool = True) -> None:
-    """Instantiate the right DataSource class, register it, and warm schema cache."""
+    """
+    Instantiate the right DataSource class, register it, and warm schema cache.
+
+    The DataSource is constructed from the **disk** copy of the config, not
+    the in-memory dict the caller passes. Reason: the caller's dict typically
+    has a plaintext password (just collected from the wizard form), while the
+    on-disk copy has the password Fernet-encrypted. The DataSource classes
+    decrypt on read, so building from the disk shape guarantees the runtime
+    instance behaves identically to one built after a server restart.
+
+    This eliminates the class of bugs where the wizard's "Test connection"
+    succeeds (uses the form plaintext directly) but the agent's first query
+    fails (uses the live source's broken `self._password`).
+
+    Falls back to the caller's dict only if the disk read fails — the new
+    tolerant `_password = decrypt_secret(pw) if is_encrypted(pw) else pw`
+    pattern in MSSQLSource handles plaintext correctly anyway, so the
+    fallback is purely defensive.
+    """
     if _source_registry is None:
         return
     from app.sources.database.mssql import MSSQLSource
@@ -71,8 +89,20 @@ def _reload_source(config: dict, warm_cache: bool = True) -> None:
         logger.warning(f"Unknown source type '{_type}' for source '{name}' — skipping")
         return
 
+    # Prefer the on-disk (encrypted) shape so runtime matches a fresh boot.
+    config_for_init = config
     try:
-        source = cls(name, config)
+        for c in load_source_configs():
+            if c.get("name") == name and c.get("type", "").lower() == _type:
+                config_for_init = c
+                break
+    except Exception:
+        logger.exception(
+            "Failed to read disk copy of '%s' config; falling back to in-memory dict", name
+        )
+
+    try:
+        source = cls(name, config_for_init)
         _source_registry.register(source)
         if warm_cache:
             try:

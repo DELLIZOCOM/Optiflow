@@ -337,7 +337,9 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 ## 5. Setup Wizard — Step by Step
 
-The setup wizard lives at `GET /setup` (served from `frontend/pages/setup.html`). It walks through 5 stages, each backed by a `/setup/*` endpoint.
+The setup wizard lives at `GET /setup` (served from `frontend/pages/setup.html`). It walks through **6 stages**, each backed by `/setup/*` endpoints. Step 5 (Email) is optional — companies without a company-mailbox can finish setup without connecting it.
+
+The root route `GET /` auto-redirects to `/setup` if either the AI key or any source (database OR email) is missing, so first-run and post-reset boots both land here without the user having to remember the URL.
 
 ### Step 1 — AI Provider
 
@@ -396,7 +398,7 @@ Runs `MSSQLSource.discover_schema()` — the most complex step. See [Schema Disc
 - `data/config/sources/{name}.json` — source config (auto-saved, password encrypted)
 - Source registered in live `SourceRegistry` immediately (no restart needed)
 
-### Step 5 — Business Context
+### Step 4 — Business Context
 
 **Endpoints:** `POST /setup/generate-company-draft` → `POST /setup/company-followup` → `POST /setup/save-company-knowledge`
 
@@ -408,6 +410,31 @@ Runs `MSSQLSource.discover_schema()` — the most complex step. See [Schema Disc
   - Ambiguities to confirm
 - Follow-up questions are generated to identify gaps (e.g. "What does Status='Pending' mean in INVOICE_DETAILS?")
 - User reviews and edits the draft in a text editor in the wizard
+
+### Step 5 — Email (optional, multi-provider)
+
+**Endpoints:** see §15 API Reference under *Email setup* — `GET /setup/email/providers`, `POST /setup/email/{outlook,imap}/test`, `POST /setup/email/{outlook,imap}`, `DELETE /setup/email/{outlook,imap}`, `GET /setup/email/status`.
+
+Step 5 opens with a **3-card provider picker**:
+
+| Card | Provider | What it talks to | Auth |
+|------|----------|------------------|------|
+| Microsoft 365 / Outlook | Outlook | Microsoft Graph (`/users`, `/messages/delta`) | Azure AD admin-consent app + client secret |
+| GoDaddy Workspace Email | IMAP (preset) | `imap.secureserver.net:993` (SSL preset) | per-mailbox username + password |
+| Generic IMAP | IMAP (custom) | Any RFC 3501 server | host + port + SSL/plain + per-mailbox creds |
+
+Picking a card reveals the matching subform:
+
+- **Outlook subform** — Azure AD checklist (App registration → Microsoft Graph permissions `Mail.Read` + `User.Read.All` with admin consent → client secret) + tenant-id / client-id / client-secret fields. The wizard's "Test" button calls `POST /setup/email/outlook/test` to verify the credentials work end-to-end before persisting.
+- **IMAP subform (GoDaddy or Generic)** — host / port / encryption + a **multi-row mailbox editor** so you can paste in N mailboxes (email + password + optional display name + folder). The "Test" button logs into each one and SELECTs INBOX so you find out about a typo before the wizard saves.
+
+**Mutually exclusive.** Connecting one provider deletes the other's config and stops its ingestion task. The agent doesn't care which connector filled the cache — both write into the same `EmailStore`.
+
+**On save:** per-mailbox passwords (IMAP) or the client secret (Outlook) are Fernet-encrypted into `data/config/email/{outlook,imap}.json`, then the live source is installed via `install_email_source()` which: registers the source in `SourceRegistry`, calls `register_email_tools()` to register the 5 email-stack tools, and starts the ingestion coordinator. **No restart needed.**
+
+### Step 6 — Done
+
+The wizard ends with a success panel and a link to `/`. From here the user lands in chat with all configured tools available. The `/email` management page (separate from the wizard) handles per-mailbox `Sync now`, runtime add/remove, and a recent-activity feed.
 - On save: written to `data/knowledge/company.md`
 - Injected into the agent's system prompt on every subsequent chat request
 
@@ -530,11 +557,14 @@ Creates a FastAPI app, mounts static files, registers routes, and wires all sing
 
 **Startup sequence (in `_startup`):**
 1. `load_sources()` — reads `data/config/sources/*.json`, instantiates `MSSQLSource` / `PostgreSQLSource` / `MySQLSource`, registers in `SourceRegistry`
-2. `build_tool_registry()` — calls `create_database_tools(source_registry)` → registers `list_tables`, `get_table_schema`, `execute_sql`, `get_business_context` in `ToolRegistry`
+2. `build_tool_registry()` → calls `register_core_tools(_tool_registry, _source_registry)` which registers `list_tables`, `get_table_schema`, `execute_sql`, `get_business_context`, and `render_chart` in `ToolRegistry`. **Idempotent** — `register()` overwrites by name, so the same call is safely re-run from `_reload_source` (after a setup-wizard source-add) and from the Reset endpoint (right after `_tool_registry.clear()`). This is the fix for the "system prompt advertises a database but the agent gets `Unknown tool: list_tables`" bug.
 3. `setup_init(...)` — injects singletons into setup router
 4. `sources_init(...)` — injects singletons into sources router
 5. Creates `AgentOrchestrator` with all four singletons
 6. Registers agent router (needs orchestrator to exist first)
+7. Registers email router (`create_email_router(...)`) — exposes setup/email/* routes plus the `/entities` CRUD
+8. **`_maybe_start_outlook_source()` then `_maybe_start_imap_source()`** — both check for a persisted config and bring the live source up if found. Mutually exclusive in normal operation; safe to call both because exactly one finds anything to do. Each `install_email_source()` call also registers the 5 email-stack tools (`list_mailboxes`, `search_emails`, `get_email`, `get_email_thread`, `lookup_entity`).
+9. Mounts the root route `GET /` which redirects to `/setup` if AI key + at least one source isn't configured.
 
 **Module-level singletons** (shared across all requests):
 ```
@@ -683,6 +713,33 @@ Key methods:
 
 ---
 
+### `app/sources/email/` — Email Sources & Indexed Cache
+
+**`base.py`** — `EmailSource` protocol. Mirrors `DataSource` but adds `provider`, `tenant_display_name`, and a `store: EmailStore` accessor. Provider-agnostic — Outlook and IMAP both implement it; a future Gmail / FastMail / on-prem connector only needs a new subclass.
+
+**`store.py`** — `EmailStore`. SQLite + FTS5 (porter stemmer, unicode61, remove_diacritics) + `entities` + `entity_emails` tables. Schema migrated in place via `PRAGMA user_version` (currently v2).
+
+Key surfaces:
+- **Email side:** `upsert_emails(rows)` (batch, idempotent on `(mailbox_id, provider_msg_id)`), `search(...)` with **BM25 + 30-day time-decay re-rank + conversation grouping** (default), `get_email`, `get_thread`, `recent_emails` (activity feed), `list_mailboxes`, `mailbox_count`, `set_mailbox_status`, `delete_mailbox`, `purge_all`.
+- **Entity side:** `upsert_entity` (idempotent on `(kind, canonical_email)`, monotonic confidence), `find_entity_by_email` (case-insensitive exact match), `find_entities_by_name` (substring + token-overlap with display_name and company), `get_entity`, `list_entities`, `count_entities`, `update_entity` (partial), `delete_entity` (cascades to `entity_emails`), and `auto_discover_entities_from_recent` (called from the IMAP sync loop after every successful batch).
+
+The store uses one `asyncio.Lock()` for write serialization; reads are lock-free.
+
+**`outlook/`** — Microsoft 365 / Graph adapter:
+- `auth.py` — MSAL app-only token flow (admin-consent client credentials).
+- `graph.py` — async wrapper over the Microsoft Graph REST API (`/users`, `/users/{id}/messages`, `/users/{id}/messages/delta`).
+- `mapper.py` — Graph JSON message → `EmailStore` row dict.
+- `ingest.py` — discovery loop (hourly), per-mailbox delta loop (every 10 min), backfill loop (round-robin, 1 page/min).
+- `source.py` — `OutlookSource` implementing the `EmailSource` protocol.
+
+**`imap/`** — generic IMAP adapter (GoDaddy / Zoho / FastMail / cPanel / on-prem Postfix/Dovecot):
+- `client.py` — async wrapper over stdlib `imaplib`. Each call is offloaded to a thread executor so the event loop stays responsive. **Robust UID parser** (regex `\bUID\s+(\d+)`) handles three FETCH-response shapes (UID in preamble, UID in trailing bytes literal, neither → positional fallback). The fix for the silent zero-stored bug.
+- `ingest.py` — `IMAPCoordinator`. One `asyncio.Task` plus one `asyncio.Event` per mailbox; the per-mailbox loop awaits `wait_for(event.wait(), timeout=5min)`. A manual `sync_now` just sets the event and skips the wait. Runtime `add_mailbox` / `remove_mailbox`. Calls `auto_discover_entities_from_recent` after every successful batch so new senders become entities automatically.
+- `mapper.py` — RFC 822 bytes → row dict (stdlib `email` + `email.policy.default`, with HTML→text fallback when no plain part).
+- `source.py` — `IMAPSource` implementing the `EmailSource` protocol; proxies `sync_now`/`add_mailbox`/`remove_mailbox` to the coordinator.
+
+---
+
 ### `app/tools/base.py` — Tool Primitives
 
 **`ToolResult`** dataclass:
@@ -740,23 +797,47 @@ All four tools use `_resolve_source`, so the `source` parameter is always option
 
 ---
 
+### `app/tools/email.py` — Email Tool Implementations
+
+Five tools, all bound to a single `EmailStore` instance via `register_email_tools(registry, store)`. Provider-agnostic — Outlook and IMAP both populate the same store.
+
+**`ListMailboxesTool` (`list_mailboxes`)** — every active mailbox with `message_count`, `last_sync`, `initial_synced`, `backfill_done`. Cheap (one indexed query).
+
+**`SearchEmailsTool` (`search_emails`)** — BM25 FTS with **conversation grouping** (default `group_by_conversation=true`) and **30-day time-decay** re-rank. Filters: `mailbox`, `sender` (substring of name or address), `recipient`, `date_range` (`last_7_days` | `last_30_days` | `YYYY-MM-DD..YYYY-MM-DD`), `folder`, `has_attachments`. Returns one row per thread with `thread_message_count` + `thread_last_received` so the agent can decide whether to call `get_email_thread` for the full chain. Important safety: the FTS MATCH expression is built by the tool from a list of keyword phrases — the LLM cannot inject raw FTS5 operators.
+
+**`GetEmailTool` (`get_email`)** — full body + metadata for one message by id.
+
+**`GetEmailThreadTool` (`get_email_thread`)** — every message in a `conversation_id`, oldest first.
+
+**`LookupEntityTool` (`lookup_entity`)** — resolves a name or email into a canonical entity record with all known aliases. Email path = exact case-insensitive match on `entity_emails.email_address`. Name path = substring + token-overlap on `display_name` + `company`. Returns a small JSON record: `{found, entity: {entity_id, kind, display_name, company, confidence, emails: [...]}, candidates: [...]}`. The system prompt nudges the agent to call this **first** when the user names a contact, then pass `sender=` to `search_emails`.
+
+---
+
+### `app/tools/charts.py` — `RenderChartTool`
+
+The chart tool is registered always but **filtered out of the LLM-visible tool list when `visualise=False`** (text mode), so plain Q&A can't hallucinate it.
+
+`RenderChartTool` validates the spec strictly (chart type ∈ `bar`/`line`/`area`/`pie`/`doughnut`/`table`, ≤ 200 rows, x/y columns must exist in the supplied rows, title ≤ 120 chars, explanation ≤ 600 chars). On valid input it returns `metadata={"chart_spec": <normalized>}`; the orchestrator inspects this and emits an SSE `{"type": "chart", "spec": {...}}` event before passing through to the tool, which returns a confirmation so the LLM continues to its short text answer. The frontend buffers chart events and renders them via Chart.js inside the AI message card. See §11 for the SSE event shape.
+
+---
+
 ### `app/ai/client.py` — Unified LLM Interface
 
-**`AIClient`** (async, for agent loop):
-- `complete(messages, system, tools, max_tokens=16000)` → full Anthropic response object
-- Reads config fresh on every call (no restart needed after setup changes)
-- Agent mode requires Anthropic — raises `NotImplementedError` for OpenAI/custom
-- Catches `anthropic.RateLimitError` → raises `RateLimitExhausted(retry_after=N)`
+**`AIClient.complete_stream(messages, system, tools, max_tokens=16000)`** (async generator, the only LLM entry point used by the agent loop):
+- Reads AI config fresh per call (no restart needed after setup changes).
+- Agent mode requires Anthropic — raises `NotImplementedError` for OpenAI / custom endpoints.
+- Yields `text_delta` / `tool_use_start` / `rate_limit_wait` / `rate_limit_tick` / `rate_limit_resume` / `final_message` events. See §11 for full shapes.
+- **Anthropic prompt caching:** before each `messages.stream()` call, `_with_system_cache(system)` converts the prompt into the structured-list form with `cache_control: {"type": "ephemeral"}`, and `_with_tool_cache(tools)` tags the **last** tool definition (which per Anthropic's rules covers the whole array). The system prompt + tool definitions are byte-identical across all 3–10 ReAct iterations of one turn (and across turns within ~5 min), so 90% of those tokens evaporate on subsequent calls. Quality impact: **zero** — the model sees identical bytes; only billing changes. Typical savings on a 5-iteration question: **60–80% off the input bill**.
+- **Cache visibility:** `_log_cache_usage(usage)` emits `[AIClient] tokens: in=N cache_read=N cache_write=N out=N (saved ~X% on cached portion)` after every stream completes.
+- **Rate-limit retries:** Anthropic SDK's silent retries are disabled (`max_retries=0`). The custom retry loop emits `rate_limit_wait` → `rate_limit_tick` (1 Hz countdown) → `rate_limit_resume`, up to 3 attempts capped at 90s per wait. Beyond that, raises `RateLimitExhausted(retry_after=N)`.
+- **Proactive throttle:** `_async_record_call()` reads `anthropic-ratelimit-requests-remaining` from the last response. When the bucket is nearly empty it spaces the next call by 1–4s — most 429s never happen.
 
-**`get_completion(system, user, max_tokens=8000)`** (sync, for setup wizard):
-- Supports Anthropic, OpenAI, and custom (OpenAI-compatible) endpoints
-- Returns plain text string
-- Used by company draft generation and follow-up question generation
+**`get_completion(system, user, max_tokens=8000)`** (sync, for setup wizard) — supports Anthropic, OpenAI, and custom (OpenAI-compatible) endpoints. Returns plain text. Used by company draft generation and follow-up question generation only — the agent loop does not use this path.
 
 **Module-level rate limiter:**
-- Deque-based sliding window: 25 calls per 60 seconds
-- If approaching limit: sleeps up to 5 seconds to queue the call
-- If wait would be > 5 seconds: logs warning and proceeds immediately
+- Deque-based sliding window: 25 calls per 60 seconds.
+- If approaching limit: sleeps up to 5 seconds to queue the call.
+- If wait would be > 5 seconds: logs warning and proceeds immediately.
 
 ---
 
@@ -897,24 +978,54 @@ Current local datetime is `2026-04-13 14:30:22 IST`.
 Interpret relative dates using this date and timezone unless the user specifies otherwise.
 ```
 
-**Part 3 — Connected Database (dynamic, from live SourceRegistry):**
+**Part 3 — Connected sources (one entry per registered source, sorted DBs first):**
 ```
-## Connected Database
-Source: `my_db` | Type: MSSQL | Database: MyDatabase
-Call `list_tables` to get the full schema directory, relationships, and dialect rules.
+## Connected sources
+- `ezee_bizflow_original` — MSSQL (Ezee_BizFlow_Original). Production reporting DB. 248 tables. Read-only.
+- `imap` — IMAP (EcoSoft Email). Company email (IMAP). 1 mailbox indexed. Read-only.
 ```
 
-**Part 4 — Business Context (from `data/knowledge/company.md`):**
-Full company knowledge document — table purposes, status meanings, business flows, guardrails.
+**Part 4 — Source-specific guidance (each source contributes its own block):**
+The orchestrator iterates registered sources and concatenates each one's `get_system_prompt_section()`. Database sources surface dialect rules + their `list_tables` orientation reminder; email sources surface keyword-expansion + date-range translation tips. **Adding a new source type only requires the new source class — the agent prompt does not change.**
 
-### The Four Agent Tools
+**Part 5 — Visualisation Mode addendum** (only when `visualise=True`):
+A short block instructs the agent to query the data → call `render_chart` once with the rows it already has → write a brief 1–3 sentence text summary. In text mode this part is omitted.
+
+**Part 6 — Runtime Context (current date/time, IST).**
+
+**Part 7 — Business Context (from `data/knowledge/company.md`):**
+Full company knowledge document. Cached in memory with mtime invalidation so edits to the file take effect without restart.
+
+### The Ten Agent Tools
+
+The tool list is the union of the always-on core (4 DB tools + `render_chart`) and the email-stack tools (5 more, registered when an email source is up):
+
+**Database core (always on):**
 
 | Tool | Purpose | Called when |
 |------|---------|-------------|
-| `list_tables()` | Orientation — returns SQL dialect + all tables + relationships | First call every question |
-| `get_table_schema(tables)` | Column detail — names, types, roles, sample values | After list_tables, before writing SQL |
+| `list_tables()` | Orientation — returns SQL dialect + all tables + relationships | First call on every database question |
+| `get_table_schema(tables)` | Column detail — names, types, roles, sample values | After `list_tables`, before writing SQL |
 | `execute_sql(sql, explanation)` | Run a SELECT query | When ready to retrieve data |
-| `get_business_context(topic?)` | Domain knowledge lookup | When business term isn't clear from schema |
+| `get_business_context(topic?)` | Domain knowledge lookup | When a business term isn't clear from schema |
+
+**Email stack (registered when an email source is configured):**
+
+| Tool | Purpose | Called when |
+|------|---------|-------------|
+| `list_mailboxes()` | Show indexed mailboxes + sync state | The user asks who is covered; before scoping a `mailbox=` filter |
+| `search_emails(keywords, …)` | BM25 + 30-day time-decay + conversation-grouped search | Communication / "did anyone email about X" questions |
+| `get_email(email_id)` | Full body for one message | When the snippet preview isn't enough |
+| `get_email_thread(conversation_id)` | Every message in a thread | When the user asks for the whole conversation |
+| `lookup_entity(query, kind?)` | Resolve a name or email to all known aliases | **First** when the user names a contact ("did Acme email us") |
+
+**Visualization (gated by `visualise=True`):**
+
+| Tool | Purpose | Called when |
+|------|---------|-------------|
+| `render_chart(type, title, x, y, rows, …)` | Surface a chart in the UI | The user picked Chart mode; once after the data is retrieved |
+
+In text mode the orchestrator filters `render_chart` out of the LLM-visible tool list — plain Q&A can't accidentally call it. In chart mode the orchestrator additionally appends the Visualisation-Mode addendum to the system prompt and intercepts the call to emit an SSE `chart` event before the tool's own `execute()` runs.
 
 ### Typical Agent Flow (4 iterations)
 
@@ -1327,13 +1438,46 @@ This is a soft guardrail (LLM instruction) — not a hard technical filter. Do n
 | `DELETE` | `/sources/{name}` | Remove source (config + schema data) |
 | `POST` | `/sources/{name}/rediscover` | Re-run schema discovery for existing source |
 
+### Email setup (provider-agnostic shared + Outlook + IMAP)
+
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| `GET` | `/setup/email/providers` | — | Static list of provider presets (Outlook, GoDaddy, Generic IMAP) for the wizard |
+| `GET` | `/setup/email/status` | — | Live status payload: provider, mailbox counts, error list, per-mailbox details, IMAP-specific extras (host/port/SSL/imap_provider/configured_mailboxes) |
+| `POST` | `/setup/email/outlook/test` | `OutlookCredsRequest` | Validate Azure AD tenant / client_id / client_secret end-to-end without persisting |
+| `POST` | `/setup/email/outlook` | `OutlookCredsRequest` | Validate, encrypt, persist, install live source, kick off ingestion |
+| `DELETE` | `/setup/email/outlook` | `{wipe_cache?}` | Stop ingestion, drop config; optionally wipe `email.db` |
+| `POST` | `/setup/email/imap/test` | `IMAPCredsRequest` | Validate every mailbox in the request (login + SELECT INBOX) |
+| `POST` | `/setup/email/imap` | `IMAPCredsRequest` | Validate, encrypt per-mailbox passwords, persist, install live source |
+| `DELETE` | `/setup/email/imap` | `{wipe_cache?}` | Stop ingestion, drop config |
+| `POST` | `/setup/email/sync_now` | `{mailbox_id?}` | Manual poll trigger. IMAP fires the per-mailbox wake event (skips the 5-min wait). Outlook returns a no-op note (uses its own 10-min Graph delta cadence). |
+| `POST` | `/setup/email/imap/mailboxes` | `IMAPMailboxAddRequest` | Add one mailbox at runtime — validates login, persists, spawns the poll task. No restart. |
+| `DELETE` | `/setup/email/imap/mailboxes` | `IMAPMailboxRemoveRequest` | Stop polling a mailbox; optional `purge_cache=true` to also delete its messages |
+| `GET` | `/setup/email/recent_messages` | `?limit=20&mailbox_id=…` | Activity feed for the management dashboard |
+
+### Entity resolution
+
+Provider-agnostic CRUD over the canonical-contacts table. Returns 503 if no email source is configured (entities live alongside indexed mail).
+
+| Method | Path | Body / Query | Description |
+|--------|------|--------------|-------------|
+| `GET` | `/entities` | `?kind=&min_confidence=&limit=&offset=` | List entities, newest-seen first |
+| `GET` | `/entities/{entity_id}` | — | Fetch one entity with all addresses |
+| `POST` | `/entities` | `EntityUpsertRequest` | Create or update; idempotent on `(kind, canonical_email)` |
+| `PATCH` | `/entities/{entity_id}` | `EntityUpdateRequest` | Partial update — promote kind, edit notes, link `source_pk` |
+| `DELETE` | `/entities/{entity_id}` | — | Hard delete; cascades to `entity_emails` |
+| `POST` | `/entities/discover` | `?lookback_seconds=86400` | Manual one-shot discovery pass over recent mail |
+
 ### Static
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/` | Chat page (`frontend/pages/chat.html`) |
+| `GET` | `/` | Chat page (`frontend/pages/chat.html`); 303-redirects to `/setup` if AI key + at least one source isn't configured |
 | `GET` | `/setup` | Setup wizard (`frontend/pages/setup.html`) |
+| `GET` | `/email` | Email management dashboard (`frontend/pages/email.html`) |
 | `GET` | `/static/*` | Frontend assets (CSS, JS) |
+
+**Total registered routes: 42.**
 
 ---
 
@@ -1401,6 +1545,64 @@ Written during permission check step. For audit purposes.
 ```
 VGhpcyBpcyBhIHNhbXBsZSBrZXkgZm9yIGlsbHVzdHJhdGlvbiBvbmx5AAAA
 ```
+
+### `data/config/email/outlook.json`
+
+Persisted Outlook (Microsoft 365 / Graph) credentials. Created when the user completes the Email step of the wizard with the Outlook card selected. **Mutually exclusive with `imap.json`** — connecting one provider deletes the other.
+
+```jsonc
+{
+  "tenant_id":           "00000000-0000-0000-0000-000000000000",
+  "client_id":           "00000000-0000-0000-0000-000000000000",
+  "client_secret":       "gAAAAA…",          // Fernet-encrypted at rest
+  "tenant_display_name": "Acme Corp",
+  "added_at":            1714312345.0,
+  "added_by":            "",
+  "backfill_days":       365
+}
+```
+
+Loaded by `app.config.load_outlook_config()` (decrypts the secret on read). Saved by `save_outlook_config()` (encrypts on write). Deleted by `delete_outlook_config()`. The file is mode 0600 to keep it readable only by the OptiFlow process owner.
+
+### `data/config/email/imap.json`
+
+Persisted IMAP credentials (GoDaddy / Zoho / FastMail / cPanel / on-prem). Created when the user completes the Email step with the GoDaddy or Generic IMAP card selected. **Mutually exclusive with `outlook.json`.**
+
+```jsonc
+{
+  "provider":            "godaddy",          // 'godaddy' | 'generic'
+  "tenant_display_name": "EcoSoft Email",
+  "host":                "imap.secureserver.net",
+  "port":                993,
+  "use_ssl":             true,
+  "backfill_days":       365,
+  "mailboxes": [
+    {
+      "account_email": "ai@ecosoftzolutions.com",
+      "password":      "gAAAAA…",            // Fernet-encrypted per-mailbox
+      "display_name":  "AI Inbox",
+      "folder":        "INBOX"
+    }
+  ],
+  "added_at":            1714312345.0,
+  "added_by":            ""
+}
+```
+
+Loaded by `app.config.load_imap_config()` (decrypts each per-mailbox password). Saved by `save_imap_config()` (encrypts only if not already encrypted, so partial round-trips like *load → mutate one mailbox → save* don't double-encrypt the others). The file is mode 0600.
+
+### `data/cache/email.db`
+
+SQLite + FTS5 cache for ingested email. Schema migrated in place via `PRAGMA user_version` (currently v2). Tables:
+
+- `mailboxes` — one row per discovered mailbox, with status + sync timestamps.
+- `emails` — canonical message table; UNIQUE on `(mailbox_id, provider_msg_id)` makes ingestion idempotent.
+- `emails_fts` — FTS5 virtual table over `subject, from_*, to_emails, body_text, attachment_names`. Triggers keep it in sync with `emails`.
+- `sync_state` — per-mailbox cursor (`delta_link` doubles as IMAP UID watermark; `last_sync_at`, `initial_synced`, `backfill_done`, `last_error`).
+- `entities` (v2) — canonical contacts. UNIQUE on `(kind, canonical_email)`.
+- `entity_emails` (v2) — many-addresses-per-entity join table. ON DELETE CASCADE.
+
+Wiped on `/setup/reset` (the Reset endpoint calls `EmailStore.purge_all()` which now also clears `entities` + `entity_emails`).
 
 ### `data/knowledge/company.md`
 
@@ -1822,7 +2024,22 @@ Total app routes after this pass: **42**.
 - `frontend/js/chat.js` — RFC-flavored SSE reader, sticky-bottom autoscroll
 - `frontend/pages/chat.html` — Inter font preconnect, bumped cache-bust query strings
 
-### 20.18 What's deliberately NOT in this pass (deferred)
+### 20.18 Credential handoff bug — wizard test passed, agent failed with SQL 18456
+
+**Symptom:** after `/setup/reset` followed by re-running the wizard, the wizard's "Test connection" succeeded but the agent's first `execute_sql` failed with SQL Server error 18456 (Login failed).
+
+**Root cause:** the wizard's `discover-schema` and `save-source` handlers built a config dict with the **plaintext** password just collected from the form. They called `save_source_config(config)` which made a shallow copy, encrypted the copy, and wrote it to disk — but the caller's dict still held the plaintext. They then called `_reload_source(config)` with that same in-memory dict, which passed it to `MSSQLSource.__init__`. The constructor blindly called `decrypt_secret(plaintext)` — and `decrypt_secret` swallowed the `InvalidToken` exception and returned `""`. The live `MSSQLSource` ended up with `self._password = ""`. The next agent query connected with an empty password → SQL Server returned 18456.
+
+The wizard's "Test connection" path didn't show the bug because it called `MSSQLSource.connect(server, db, user, password)` with the form plaintext directly, bypassing the broken `self._password`.
+
+**Two-layer fix:**
+
+1. **Defense in depth** — `MSSQLSource.__init__` now uses `decrypt_secret(pw) if is_encrypted(pw) else pw`. The constructor accepts both shapes (plaintext form-input dict OR encrypted disk-loaded dict) without silently corrupting the password. (`app/sources/database/mssql.py`)
+2. **Structural fix** — `_reload_source` now re-reads the source config from disk via `load_source_configs()` after `save_source_config()` has written it. The runtime `DataSource` instance is therefore built from the same encrypted shape it would see after a server restart, eliminating divergence between the wizard-test path and the agent-runtime path. Falls back to the in-memory dict only if the disk read fails. (`app/routes/setup.py::_reload_source`)
+
+**Verified** with five test cases: plaintext input preserved, encrypted input decrypted, empty input handled, corrupted ciphertext degrades gracefully (no crash), and the full `_reload_source` flow against the live saved config produces a source with the correct 6-char password (not the form-dict's stale value).
+
+### 20.19 What's deliberately NOT in this pass (deferred)
 
 - **Hybrid retrieval** (BM25 + dense embeddings + RRF). Worth doing past ~100k messages or when semantic search becomes a real need.
 - **Cross-encoder reranker.** Marginal gains over hybrid; defer.

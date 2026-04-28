@@ -52,13 +52,20 @@ class MSSQLSource(DatabaseSource):
 
     def __init__(self, name: str, config: dict):
         super().__init__(name, config)
-        from app.utils.crypto import decrypt_secret
+        from app.utils.crypto import decrypt_secret, is_encrypted
         creds = config.get("credentials", {})
         self._server   = creds.get("server", "")
         self._database = creds.get("database", "")
         self._user     = creds.get("user", "")
-        pw = creds.get("password", "")
-        self._password = decrypt_secret(pw) if pw else ""
+        # Tolerant of both shapes:
+        #   * config came from disk (Fernet-encrypted, starts with 'gAAAA') → decrypt
+        #   * config came straight from the wizard's form (plaintext)       → use as-is
+        # This eliminates the historical bug where _reload_source(config) was
+        # called with the in-memory plaintext dict but __init__ blindly tried
+        # to decrypt it, silently producing self._password = "" and breaking
+        # every subsequent agent query with SQL error 18456.
+        pw = creds.get("password", "") or ""
+        self._password = decrypt_secret(pw) if is_encrypted(pw) else pw
 
     def get_db_type(self) -> str:
         return "mssql"

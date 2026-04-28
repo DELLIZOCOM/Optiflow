@@ -7,6 +7,7 @@ data/config/app.json
 data/config/model_config.json
 data/config/security.json
 data/config/sources/
+data/config/email/
 
 # =====================
 # Runtime data (generated, may contain sensitive DB info)
@@ -58,3 +59,11 @@ Thumbs.db
 # Claude / AI context
 # =====================
 .claude/
+
+# =====================
+# Local notes / scratch
+# =====================
+learn.md
+
+# Stray legacy artifact at repo root (canonical path data/prompts/ already ignored)
+/prompts/

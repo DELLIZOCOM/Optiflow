@@ -64,7 +64,23 @@ function fmtClock() {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function scrollBottom(smooth) {
+// Autoscroll respects "the user scrolled up to read." If they're near the
+// bottom we keep pinning them there as new content streams in; if they
+// scrolled up to look at something earlier, we leave their position alone.
+// `force: true` overrides this (used after the user themselves sends a msg).
+let _autoStickBottom = true;
+function _isNearBottom(el, slack = 80) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < slack;
+}
+if (chatArea) {
+  chatArea.addEventListener('scroll', () => {
+    _autoStickBottom = _isNearBottom(chatArea, 80);
+  }, { passive: true });
+}
+function scrollBottom(opts) {
+  const smooth = (opts === true) || (opts && opts.smooth);
+  const force  = !!(opts && opts.force);
+  if (!force && !_autoStickBottom) return;
   if (smooth) {
     chatArea.scrollTo({ top: chatArea.scrollHeight, behavior: 'smooth' });
   } else {
@@ -174,7 +190,10 @@ function renderUserMessage(text, opts) {
   msg.appendChild(meta);
 
   chatInner.appendChild(msg);
-  scrollBottom();
+  // User just sent something — force-scroll and re-stick to the bottom so the
+  // streaming response below stays visible.
+  _autoStickBottom = true;
+  scrollBottom({ force: true });
   return msg;
 }
 
@@ -786,35 +805,89 @@ function _destroyAllCharts() {
 
 // ── SSE reader ──────────────────────────────────────────────────────────────
 
+// SSE reader — RFC-flavored.
+//   * Frames are separated by a blank line (\n\n or \r\n\r\n).
+//   * Inside a frame, any number of `data:` lines concatenate with '\n'.
+//   * Lines starting with `:` are comments / keep-alives, ignored.
+//   * The literal payload `[DONE]` ends the stream.
+//   * Malformed JSON is logged once but never throws — a single bad chunk
+//     should not nuke the rest of the stream.
+//   * On any HTTP error, surfaces enough info that the caller can show the
+//     user a real message rather than a generic "Connection error."
 async function _readSSE(url, body, signal, onEvent) {
-  const res = await fetch(url, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-    body:    JSON.stringify(body),
-    signal:  signal,
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      body:    JSON.stringify(body),
+      signal:  signal,
+    });
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw e;
+    throw new Error('Network: ' + (e && e.message ? e.message : 'request failed'));
+  }
 
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  if (!res.body) throw new Error('No response body');
+  if (!res.ok) {
+    // Try to surface the server's error body if it's JSON; otherwise the
+    // status line is at least informative.
+    let detail = '';
+    try { const j = await res.json(); detail = j && (j.detail || j.error || j.message) || ''; } catch (_) {}
+    throw new Error('HTTP ' + res.status + (detail ? ' — ' + detail : ''));
+  }
+  if (!res.body) throw new Error('No response body (does this browser support fetch streams?)');
 
   const reader  = res.body.getReader();
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder('utf-8');
   let buffer = '';
+  let parseErrors = 0;
+
+  function _dispatchFrame(frame) {
+    // A frame is one or more lines. Concatenate all `data:` lines.
+    const lines = frame.split('\n');
+    let data = '';
+    for (const ln of lines) {
+      if (!ln) continue;
+      if (ln.charAt(0) === ':') continue;          // comment / keep-alive
+      if (ln.startsWith('data:')) {
+        data += (data ? '\n' : '') + ln.slice(ln.charAt(5) === ' ' ? 6 : 5);
+      }
+      // event:/id:/retry: — ignored, we only emit `data:` payloads server-side
+    }
+    if (!data) return false;
+    if (data === '[DONE]') return true;            // signal end-of-stream
+    try {
+      onEvent(JSON.parse(data));
+    } catch (e) {
+      if (parseErrors++ < 3) {
+        // eslint-disable-next-line no-console
+        console.warn('[SSE] could not parse frame:', e && e.message, '| payload:', data.slice(0, 200));
+      }
+    }
+    return false;
+  }
 
   try {
     while (true) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) {
+        // Flush any final bytes from the decoder + any trailing frame.
+        buffer += decoder.decode();
+        if (buffer.trim()) _dispatchFrame(buffer.replace(/\r\n/g, '\n').trim());
+        break;
+      }
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop(); // keep last partial line
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const raw = line.slice(6).trim();
-        if (raw === '[DONE]') return;
-        try { onEvent(JSON.parse(raw)); } catch (_) {}
+      // Split on the blank-line frame separator. Normalize CRLF first.
+      buffer = buffer.replace(/\r\n/g, '\n');
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        if (frame.trim()) {
+          if (_dispatchFrame(frame)) return;       // [DONE] received
+        }
       }
     }
   } finally {

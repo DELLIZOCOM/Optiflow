@@ -3,20 +3,26 @@
    ============================================================================ */
 
 :root {
-  /* Palette */
-  --bg-app:          #f4f5f7;
+  /* Palette
+     Sidebar is a deeper near-black; the top header is a noticeably lighter
+     slate so the two surfaces don't read as one continuous strip. A thin
+     accent rule sits on the seam to make the boundary unambiguous. */
+  --bg-app:          #f3f4f7;
   --bg-surface:      #ffffff;
-  --bg-muted:        #f8f9fb;
+  --bg-muted:        #f6f7fa;
+  --bg-soft:         #fbfcfd;
   --bg-code:         #0f1117;
-  --bg-header:       #111827;
+  --bg-sidebar:      #0b1220;       /* deepest — nav rail */
+  --bg-header:       #1b2538;       /* one notch lighter — top bar */
   --bg-subheader:    #1f2937;
+  --seam:            #03060d;       /* hairline between sidebar + header */
 
-  --fg-primary:      #111827;
-  --fg-secondary:    #4b5563;
-  --fg-muted:        #6b7280;
-  --fg-faint:        #9ca3af;
-  --fg-invert:       #f9fafb;
-  --fg-invert-muted: #9ca3af;
+  --fg-primary:      #0f172a;
+  --fg-secondary:    #3f4757;
+  --fg-muted:        #5a6373;
+  --fg-faint:        #7d8595;       /* bumped from #9ca3af for contrast */
+  --fg-invert:       #f8fafc;
+  --fg-invert-muted: #b7c0cf;       /* bumped from #9ca3af */
 
   --accent:          #2563eb;
   --accent-hover:    #1d4ed8;
@@ -30,18 +36,20 @@
   --danger:          #dc2626;
   --danger-soft:     #fef2f2;
 
-  --border:          #e5e7eb;
-  --border-strong:   #d1d5db;
+  --border:          #e3e6ec;
+  --border-strong:   #ccd1da;
 
   --radius-sm:       6px;
   --radius-md:       10px;
   --radius-lg:       14px;
 
-  --shadow-sm:       0 1px 2px rgba(17, 24, 39, 0.04);
-  --shadow-md:       0 4px 12px rgba(17, 24, 39, 0.06);
+  --shadow-sm:       0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-md:       0 4px 14px rgba(15, 23, 42, 0.07);
+  --shadow-lg:       0 12px 28px rgba(15, 23, 42, 0.12);
+  --shadow-header:   0 1px 0 rgba(15, 23, 42, 0.06), 0 6px 16px -10px rgba(15, 23, 42, 0.18);
 
-  --font-ui:         -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Text",
-                     "Helvetica Neue", Arial, sans-serif;
+  --font-ui:         "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+                     "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
   --font-mono:       "JetBrains Mono", "SF Mono", Menlo, Consolas, Monaco,
                      "Courier New", monospace;
 }
@@ -113,7 +121,9 @@ input:focus-visible {
 /* ── Header ─────────────────────────────────────────────────────────────────── */
 
 .header {
-  background: var(--bg-header);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(0,0,0,0.06) 100%),
+    var(--bg-header);
   color: var(--fg-invert);
   padding: 14px 24px;
   flex-shrink: 0;
@@ -121,7 +131,20 @@ input:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid #0b1220;
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow-header);
+  position: relative;
+  z-index: 5;
+}
+/* Hairline accent on the seam between sidebar (darker) and header (lighter)
+   so the two surfaces don't optically merge into one slab. */
+.header::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 1px;
+  background: var(--seam);
+  pointer-events: none;
 }
 
 .header-left {
@@ -155,13 +178,13 @@ input:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px;
+  padding: 4px 11px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 500;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--fg-invert-muted);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.07);
+  color: #d8dee9;
+  border: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .session-pill .dot {
@@ -189,24 +212,25 @@ input:focus-visible {
 }
 
 .hdr-btn {
-  background: transparent;
+  background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  color: var(--fg-invert-muted);
-  padding: 6px 12px;
+  color: #e2e8f0;
+  padding: 6px 13px;
   border-radius: var(--radius-sm);
   font-size: 12.5px;
   font-weight: 500;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.08s;
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
 .hdr-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--fg-invert);
-  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.10);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.26);
 }
+.hdr-btn:active { transform: translateY(1px); }
 
 .hdr-btn.danger:hover {
   border-color: #fca5a5;
@@ -218,11 +242,15 @@ input:focus-visible {
 .chat-area {
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: 28px 24px 16px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   scroll-behavior: smooth;
+  /* Faint vertical gradient to give the cards a surface to sit on. */
+  background:
+    radial-gradient(1200px 600px at 50% -100px, rgba(37, 99, 235, 0.04), transparent 60%),
+    var(--bg-app);
 }
 
 .chat-area::-webkit-scrollbar       { width: 10px; }
@@ -255,8 +283,8 @@ input:focus-visible {
   align-self: flex-start;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 14px 14px 14px 4px;
-  padding: 20px 24px;
+  border-radius: 16px 16px 16px 4px;
+  padding: 22px 26px;
   box-shadow: var(--shadow-sm);
   position: relative;
   width: 100%;
@@ -264,18 +292,20 @@ input:focus-visible {
 
 .msg-user {
   align-self: flex-end;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent) 0%, #1e4fd6 100%);
   color: #fff;
-  border-radius: 14px 14px 4px 14px;
+  border-radius: 16px 16px 4px 16px;
   padding: 14px 18px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md);
   max-width: 78%;
 }
 
 .msg-text {
-  font-size: 15px;
-  line-height: 1.7;
+  font-size: 15.5px;
+  line-height: 1.72;
   word-wrap: break-word;
+  color: var(--fg-primary);
+  letter-spacing: -0.003em;
 }
 
 .msg-user .msg-text {
@@ -284,9 +314,11 @@ input:focus-visible {
 }
 
 .msg-meta {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--fg-muted);
-  margin-top: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -294,18 +326,20 @@ input:focus-visible {
 }
 
 .msg-user .msg-meta {
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(255, 255, 255, 0.85);
   justify-content: flex-end;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
 }
 
 .msg-meta .badge {
   background: var(--bg-muted);
   color: var(--fg-secondary);
-  padding: 2px 8px;
+  padding: 3px 9px;
   border-radius: 999px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 500;
   border: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
 }
 
 .msg-action {
@@ -328,23 +362,23 @@ input:focus-visible {
 .empty-state {
   align-self: center;
   text-align: center;
-  padding: 56px 20px;
+  padding: 64px 24px;
   color: var(--fg-muted);
-  max-width: 560px;
+  max-width: 600px;
   margin: auto;
 }
 
 .empty-state h2 {
-  font-size: 22px;
-  font-weight: 600;
+  font-size: 26px;
+  font-weight: 650;
   color: var(--fg-primary);
-  margin-bottom: 10px;
-  letter-spacing: -0.01em;
+  margin-bottom: 12px;
+  letter-spacing: -0.02em;
 }
 
 .empty-state p {
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 15px;
+  line-height: 1.65;
   color: var(--fg-secondary);
 }
 
@@ -353,24 +387,30 @@ input:focus-visible {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: center;
-  margin-top: 24px;
+  margin-top: 28px;
 }
 
 .empty-chip {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   color: var(--fg-secondary);
-  padding: 8px 14px;
+  padding: 9px 16px;
   border-radius: 999px;
-  font-size: 13px;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.08s, box-shadow 0.15s;
+  box-shadow: var(--shadow-sm);
 }
 
 .empty-chip:hover {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
 }
+.empty-chip:active { transform: translateY(0); }
 
 /* ── Markdown (AI messages) ─────────────────────────────────────────────────── */
 
@@ -488,16 +528,18 @@ input:focus-visible {
   align-items: flex-end;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 8px 8px 8px 16px;
+  border-radius: 16px;
+  padding: 10px 10px 10px 18px;
   box-shadow: var(--shadow-md);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .input-bar:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-md);
 }
+
+.input-bar textarea { font-size: 15px; }
 
 .input-bar textarea {
   flex: 1;
@@ -711,7 +753,16 @@ input:focus-visible {
   text-align: center;
 }
 
-/* ── Agent trace panel ──────────────────────────────────────────────────────── */
+/* ── Agent trace panel ──────────────────────────────────────────────────────
+ *
+ * Goal: read as a "thinking notebook," not a code window.
+ *  - Header gets a soft tinted background, not a code-grey strip.
+ *  - Thinking text uses the UI font at ~13.5px in the primary fg color so
+ *    streaming reasoning is comfortably readable.
+ *  - Tool labels are sentence-case, not monospace. Only the SQL itself
+ *    stays monospace, hidden behind a disclosure.
+ *  - Steps are spaced out with a left rail rather than full borders.
+ */
 
 .trace-panel {
   max-width: 94%;
@@ -729,41 +780,45 @@ input:focus-visible {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 16px;
-  background: var(--bg-muted);
-  border-bottom: 1px solid var(--border);
-  font-size: 12.5px;
-  color: var(--fg-secondary);
+  padding: 11px 18px;
+  background: linear-gradient(180deg, #f6f8ff 0%, #eef2ff 100%);
+  border-bottom: 1px solid #dde4f3;
+  font-size: 13px;
+  color: #1e293b;
   font-weight: 500;
-  min-height: 40px;
+  min-height: 42px;
 }
 
 .trace-dots {
   display: inline-flex;
-  gap: 3px;
+  gap: 4px;
   flex-shrink: 0;
 }
 .trace-dots span {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
   background: var(--accent);
   border-radius: 50%;
   display: inline-block;
   animation: bounce 1.2s infinite;
 }
-.trace-dots span:nth-child(2) { animation-delay: 0.2s; }
-.trace-dots span:nth-child(3) { animation-delay: 0.4s; }
+.trace-dots span:nth-child(2) { animation-delay: 0.18s; }
+.trace-dots span:nth-child(3) { animation-delay: 0.36s; }
 
 @keyframes bounce {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
   30%           { transform: translateY(-4px); opacity: 1; }
 }
 
-.trace-title { flex: 1; color: var(--fg-secondary); }
+.trace-title {
+  flex: 1;
+  color: #1e293b;
+  letter-spacing: -0.005em;
+}
 
 /* Done state header */
 .trace-header-done {
-  background: #f0fdf4;
+  background: linear-gradient(180deg, #f0fdf4 0%, #ecfdf5 100%);
   border-bottom-color: #bbf7d0;
   cursor: default;
 }
@@ -784,9 +839,9 @@ input:focus-visible {
   background: #fff;
   border: 1px solid #a7f3d0;
   border-radius: 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: #065f46;
-  padding: 3px 10px;
+  padding: 4px 12px;
   font-weight: 500;
   transition: background 0.15s, border-color 0.15s;
   flex-shrink: 0;
@@ -796,59 +851,79 @@ input:focus-visible {
 /* Trace body — capped so a long stream of thinking text can't push the
    input bar off-screen. The user can scroll inside the panel to review. */
 .trace-body {
-  padding: 10px 16px 14px;
+  padding: 12px 18px 16px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: 240px;
+  gap: 6px;
+  max-height: 280px;
   overflow-y: auto;
   scroll-behavior: smooth;
+  background: var(--bg-surface);
 }
 
 .trace-body::-webkit-scrollbar       { width: 8px; }
 .trace-body::-webkit-scrollbar-track { background: transparent; }
-.trace-body::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 8px; }
+.trace-body::-webkit-scrollbar-thumb { background: #d8dde6; border-radius: 8px; }
+.trace-body::-webkit-scrollbar-thumb:hover { background: #b6bcc9; }
 
 /* ── Individual trace steps ── */
 .trace-step {
-  font-size: 12.5px;
-  line-height: 1.6;
+  font-size: 13.5px;
+  line-height: 1.65;
+  font-family: var(--font-ui);
 }
 
-/* Thinking step */
+/* Thinking step — readable prose, not a code blockquote.
+   The left rail is a soft dot strip, not a hard border, so a sequence
+   of thinking blocks doesn't look like a stack of code panels. */
 .trace-thinking {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  color: var(--fg-secondary);
-  padding: 4px 0;
-  border-left: 2px solid var(--border);
-  padding-left: 10px;
-  margin: 2px 0;
+  gap: 10px;
+  color: var(--fg-primary);
+  padding: 6px 0 6px 14px;
+  margin: 1px 0;
+  position: relative;
+}
+.trace-thinking::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  border-radius: 2px;
+  background: #cdd5e2;
 }
 .trace-thinking .trace-icon {
   flex-shrink: 0;
   line-height: 1.6;
-  opacity: 0.65;
+  font-size: 14px;
+  opacity: 0.85;
 }
 .trace-thinking .trace-text {
   flex: 1;
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--fg-secondary);
+  color: var(--fg-primary);
+  font-size: 13.5px;
+  line-height: 1.7;
 }
 
-.trace-thinking-live {
-  border-left-color: var(--accent);
+.trace-thinking-live::before {
+  background: var(--accent);
 }
 
 .trace-thinking-live .trace-text::after {
-  content: '\u258C';
+  content: '';
   display: inline-block;
-  margin-left: 1px;
-  color: var(--accent);
+  margin-left: 2px;
+  width: 7px;
+  height: 14px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  border-radius: 1px;
   animation: caretBlink 1s steps(1) infinite;
-  font-weight: bold;
 }
 
 @keyframes caretBlink {
@@ -857,40 +932,52 @@ input:focus-visible {
 
 .trace-thinking-placeholder .trace-text {
   font-style: italic;
-  color: var(--fg-faint);
+  color: var(--fg-muted);
+}
+.trace-thinking-placeholder::before {
+  background: #e3e6ec;
 }
 
-/* Tool call step */
+/* Tool call step — sentence-case label in UI font, not monospace.
+   Reads as "the agent did X" rather than as a code snippet. */
 .trace-tool {
-  padding: 6px 0 4px;
+  padding: 8px 0 4px;
 }
 
 .trace-tool-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .trace-tool-header .trace-icon {
   flex-shrink: 0;
-  width: 20px;
-  text-align: center;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 6px;
 }
 
 .trace-tool-header .trace-text {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   color: var(--fg-primary);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
+  letter-spacing: -0.005em;
 }
 
-/* SQL disclosure */
+/* SQL disclosure — the *only* monospace block, behind a "View SQL" link. */
 .trace-sql-details {
-  margin: 4px 0 2px 28px;
+  margin: 6px 0 2px 32px;
 }
 
 .trace-sql-summary {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--fg-muted);
   cursor: pointer;
   user-select: none;
@@ -919,10 +1006,10 @@ input:focus-visible {
   background: var(--bg-code);
   color: #e5e7eb;
   border-radius: 8px;
-  padding: 10px 14px;
+  padding: 12px 14px;
   font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.65;
   overflow-x: auto;
   white-space: pre;
   margin: 6px 0 4px;
@@ -932,17 +1019,19 @@ input:focus-visible {
 
 /* Tool result line */
 .trace-result {
-  font-size: 12px;
-  color: var(--fg-muted);
-  padding: 2px 0 2px 28px;
+  font-size: 12.5px;
+  color: var(--fg-secondary);
+  padding: 4px 0 4px 32px;
+  line-height: 1.55;
 }
 .trace-result-error {
   color: var(--danger);
   font-weight: 500;
 }
 .trace-arrow {
-  color: var(--fg-faint);
-  margin-right: 4px;
+  color: var(--accent);
+  margin-right: 5px;
+  font-weight: 600;
 }
 
 /* Inline rate-limit notice inside trace panel */
@@ -1074,13 +1163,18 @@ input:focus-visible {
   flex: 0 0 268px;
   width: 268px;
   height: 100vh;
-  background: var(--bg-header);
+  /* Deeper than the top header so the two read as separate surfaces.
+     A subtle inner highlight on the right edge helps it feel raised. */
+  background: var(--bg-sidebar);
   color: var(--fg-invert);
-  border-right: 1px solid #0b1220;
+  border-right: 1px solid var(--seam);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.03);
   display: flex;
   flex-direction: column;
   min-height: 0;
   transition: margin-left 220ms ease, box-shadow 220ms ease;
+  position: relative;
+  z-index: 6;
 }
 
 .sidebar.collapsed {

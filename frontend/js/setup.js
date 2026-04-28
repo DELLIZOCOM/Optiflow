@@ -2,7 +2,7 @@
 let connectionData  = null;   // {server, database, user, password}
 let schemaData      = null;   // {db_name, server, tables: [...]}
 let _draftGenerated = false;  // prevent double-generation on back/forward
-const TOTAL_STEPS   = 5;
+const TOTAL_STEPS   = 6;
 
 // ── Step navigation ────────────────────────────────────────────────────────
 function goTo(n) {
@@ -13,7 +13,7 @@ function goTo(n) {
     dot.classList.toggle('done',   i < n);
   }
   if (n === 4 && !_draftGenerated) autoGenerateKnowledge();
-  if (n === 5) buildDoneScreen();
+  if (n === 6) buildDoneScreen();
   window.scrollTo(0, 0);
 }
 
@@ -428,6 +428,235 @@ async function saveCompanyKnowledge() {
   }
 
   setLoading('btn-teach-save', false);
+}
+
+// ── Step 5: Email (provider picker, optional) ──────────────────────────────
+//
+// Supports three providers: outlook (Microsoft Graph), godaddy, generic IMAP.
+// Outlook uses tenant_id/client_id/client_secret; both IMAP variants use
+// host/port/use_ssl + a list of mailboxes (email/password/folder).
+
+let _emailProvider = null;       // 'outlook' | 'godaddy' | 'generic'
+
+function selectProvider(provider) {
+  _emailProvider = provider;
+
+  // Card highlighting
+  document.querySelectorAll('#email-provider-picker .provider-card').forEach(card => {
+    card.classList.toggle('selected', card.dataset.provider === provider);
+    const radio = card.querySelector('input[type="radio"]');
+    if (radio) radio.checked = (card.dataset.provider === provider);
+  });
+
+  // Reveal common fields once a provider is picked
+  document.getElementById('email-common-fields').style.display = 'block';
+
+  // Show the right subform
+  document.getElementById('email-outlook-form').style.display = (provider === 'outlook') ? 'block' : 'none';
+  document.getElementById('email-imap-form').style.display    = (provider === 'godaddy' || provider === 'generic') ? 'block' : 'none';
+  document.getElementById('imap-godaddy-hint').style.display  = (provider === 'godaddy') ? 'block' : 'none';
+  document.getElementById('imap-generic-hint').style.display  = (provider === 'generic') ? 'block' : 'none';
+
+  // Apply IMAP host/port preset
+  const hostEl = document.getElementById('inp-imap-host');
+  const portEl = document.getElementById('inp-imap-port');
+  const sslEl  = document.getElementById('inp-imap-ssl');
+  if (provider === 'godaddy') {
+    hostEl.value = 'imap.secureserver.net';
+    hostEl.readOnly = true;
+    portEl.value = 993;
+    sslEl.value = 'ssl';
+  } else if (provider === 'generic') {
+    if (hostEl.readOnly) hostEl.value = '';   // clear preset if switching from godaddy
+    hostEl.readOnly = false;
+    if (!portEl.value) portEl.value = 993;
+  }
+
+  // Make sure there's at least one mailbox row when switching to IMAP
+  if (provider === 'godaddy' || provider === 'generic') {
+    const wrap = document.getElementById('mailbox-rows');
+    if (wrap.children.length === 0) addMailboxRow();
+  }
+
+  // Enable test/save buttons
+  document.getElementById('btn-email-test').disabled = false;
+  document.getElementById('btn-email-save').disabled = false;
+
+  clearStatus('email-status');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('#email-provider-picker .provider-card').forEach(card => {
+    card.addEventListener('click', () => selectProvider(card.dataset.provider));
+  });
+});
+
+// ── Mailbox list editor ────────────────────────────────────────────────────
+function addMailboxRow(values = {}) {
+  const wrap = document.getElementById('mailbox-rows');
+  const row  = document.createElement('div');
+  row.className = 'mailbox-row';
+  row.innerHTML = `
+    <input type="email"    placeholder="user@company.com"   class="mb-email"    autocomplete="off" spellcheck="false" value="${escAttr(values.account_email || '')}">
+    <input type="password" placeholder="password / app pw"   class="mb-pass"     autocomplete="new-password"          value="${escAttr(values.password || '')}">
+    <input type="text"     placeholder="Display name (opt.)" class="mb-display"  autocomplete="off"                    value="${escAttr(values.display_name || '')}">
+    <input type="text"     placeholder="INBOX"               class="mb-folder"   autocomplete="off"                    value="${escAttr(values.folder || 'INBOX')}">
+    <button type="button" class="btn-remove-mailbox" title="Remove this mailbox" aria-label="Remove">×</button>
+  `;
+  row.querySelector('.btn-remove-mailbox').addEventListener('click', () => {
+    row.remove();
+    // Always keep at least one row visible so the user has something to type into
+    if (document.getElementById('mailbox-rows').children.length === 0) addMailboxRow();
+  });
+  wrap.appendChild(row);
+}
+
+function _readMailboxRows() {
+  const out = [];
+  document.querySelectorAll('#mailbox-rows .mailbox-row').forEach(row => {
+    const account_email = row.querySelector('.mb-email').value.trim().toLowerCase();
+    const password      = row.querySelector('.mb-pass').value;
+    const display_name  = row.querySelector('.mb-display').value.trim();
+    const folder        = row.querySelector('.mb-folder').value.trim() || 'INBOX';
+    if (!account_email && !password) return;   // skip blank
+    out.push({ account_email, password, display_name: display_name || null, folder });
+  });
+  return out;
+}
+
+// ── Field collection / validation ──────────────────────────────────────────
+function _commonFields() {
+  return {
+    tenant_display_name: document.getElementById('inp-email-display').value.trim(),
+    backfill_days:       parseInt(document.getElementById('inp-email-backfill').value, 10) || 365,
+  };
+}
+
+function _outlookFields() {
+  return {
+    ..._commonFields(),
+    tenant_id:     document.getElementById('inp-email-tenant').value.trim(),
+    client_id:     document.getElementById('inp-email-client').value.trim(),
+    client_secret: document.getElementById('inp-email-secret').value,
+  };
+}
+
+function _imapFields() {
+  const sslVal = document.getElementById('inp-imap-ssl').value;
+  return {
+    ..._commonFields(),
+    provider:  _emailProvider,                                 // 'godaddy' | 'generic'
+    host:      document.getElementById('inp-imap-host').value.trim(),
+    port:      parseInt(document.getElementById('inp-imap-port').value, 10) || 993,
+    use_ssl:   sslVal === 'ssl',
+    mailboxes: _readMailboxRows(),
+  };
+}
+
+function _validateOutlook(f) {
+  if (!f.tenant_display_name)                          return 'Display name is required.';
+  if (!f.tenant_id || f.tenant_id.length < 8)          return 'Tenant ID looks too short.';
+  if (!f.client_id || f.client_id.length < 8)          return 'Client ID looks too short.';
+  if (!f.client_secret || f.client_secret.length < 8)  return 'Client secret is required.';
+  return null;
+}
+
+function _validateImap(f) {
+  if (!f.tenant_display_name)                  return 'Display name is required.';
+  if (!f.host || f.host.length < 3)            return 'IMAP host is required.';
+  if (!f.port || f.port < 1 || f.port > 65535) return 'IMAP port is invalid.';
+  if (!f.mailboxes || !f.mailboxes.length)     return 'Add at least one mailbox.';
+  for (const m of f.mailboxes) {
+    if (!m.account_email || !/^[^\s@]+@[^\s@]+$/.test(m.account_email)) return `Invalid email: "${m.account_email || ''}"`;
+    if (!m.password)                                                    return `Password missing for ${m.account_email}.`;
+  }
+  return null;
+}
+
+// ── Test / Save ────────────────────────────────────────────────────────────
+async function testEmail() {
+  if (!_emailProvider) { setStatus('email-status', 'error', 'Pick a provider above first.'); return; }
+
+  let body, url, infoMsg;
+  if (_emailProvider === 'outlook') {
+    body = _outlookFields();
+    const err = _validateOutlook(body);
+    if (err) { setStatus('email-status', 'error', err); return; }
+    url = '/setup/email/outlook/test';
+    infoMsg = 'Asking Microsoft Graph for a token and listing a mailbox…';
+  } else {
+    body = _imapFields();
+    const err = _validateImap(body);
+    if (err) { setStatus('email-status', 'error', err); return; }
+    url = '/setup/email/imap/test';
+    infoMsg = `Logging in to ${body.host}:${body.port} for each mailbox…`;
+  }
+
+  clearStatus('email-status');
+  setLoading('btn-email-test', true, 'Testing…');
+  setStatus('email-status', 'info', infoMsg);
+
+  try {
+    const res  = await fetch(url, {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.success) {
+      const extra = (data.mailbox_count != null) ? ` (${data.mailbox_count} mailbox(es))` : '';
+      setStatus('email-status', 'success', 'Credentials accepted' + extra + '. You can save and continue.');
+    } else {
+      setStatus('email-status', 'error', data.error || 'Test failed.');
+    }
+  } catch (e) {
+    setStatus('email-status', 'error', 'Network error: ' + e.message);
+  }
+
+  setLoading('btn-email-test', false);
+}
+
+async function saveEmail() {
+  if (!_emailProvider) { setStatus('email-status', 'error', 'Pick a provider above first.'); return; }
+
+  let body, url;
+  if (_emailProvider === 'outlook') {
+    body = _outlookFields();
+    const err = _validateOutlook(body);
+    if (err) { setStatus('email-status', 'error', err); return; }
+    url = '/setup/email/outlook';
+  } else {
+    body = _imapFields();
+    const err = _validateImap(body);
+    if (err) { setStatus('email-status', 'error', err); return; }
+    url = '/setup/email/imap';
+  }
+
+  clearStatus('email-status');
+  setLoading('btn-email-save', true, 'Saving…');
+
+  try {
+    const res  = await fetch(url, {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.success) {
+      setStatus('email-status', 'success', 'Email source connected. Ingestion running in the background.');
+      goTo(6);
+    } else {
+      setStatus('email-status', 'error', data.error || 'Save failed.');
+    }
+  } catch (e) {
+    setStatus('email-status', 'error', 'Network error: ' + e.message);
+  }
+
+  setLoading('btn-email-save', false);
+}
+
+function escAttr(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ── Step 5: Done ───────────────────────────────────────────────────────────

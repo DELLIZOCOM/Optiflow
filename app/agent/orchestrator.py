@@ -22,12 +22,10 @@ import asyncio
 import json
 import logging
 import re
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import AsyncGenerator, Optional
-from weakref import WeakValueDictionary
 
 logger = logging.getLogger(__name__)
 
@@ -35,184 +33,7 @@ _MAX_ITERATIONS = 15
 
 _COMPANY_MD_CACHE: dict = {"mtime": 0.0, "content": ""}
 
-
-class _SessionBusyError(RuntimeError):
-    """Raised when a second request arrives for a session already in flight."""
-    pass
-
 _THINKING_RE = re.compile(r"<thinking>(.*?)</thinking>", re.DOTALL | re.IGNORECASE)
-_CHART_BLOCK_RE = re.compile(r"<chart\b[^>]*>(.*?)</chart>", re.DOTALL | re.IGNORECASE)
-
-_CHART_TYPES = ("bar", "line", "pie", "doughnut", "area", "table")
-_MAX_CHARTS_PER_TURN = 4
-
-_VISUALISE_INSTRUCTIONS = """\
-## VISUALISE MODE — produce charts, not a long narrative
-
-The user has asked for a **visual** answer. After running the SQL you need \
-and gathering the data, your final assistant message MUST:
-
-1. Start with a short text explanation (1–3 sentences) — the headline finding. \
-No tables of numbers; the chart will show them.
-2. Follow with one or more `<chart>` blocks, each containing a JSON spec. \
-Example:
-
-```
-<chart data="last_query">
-{
-  "type": "bar",
-  "title": "Revenue by month",
-  "x": "month",
-  "y": "revenue",
-  "explanation": "Peak in March; dip in July matched the pricing change."
-}
-</chart>
-```
-
-Spec rules (strict — invalid charts are dropped):
-- `type` must be one of: `bar`, `line`, `pie`, `doughnut`, `area`, `table`.
-- `x` must be a column name from the most recent `execute_sql` result.
-- `y` must be a numeric column name, or a JSON array of numeric column names \
-(for multi-series charts). For `pie` / `doughnut`, `y` must be a single numeric column.
-- `title` is required. `explanation` is optional but encouraged (1 sentence).
-- `data` attribute must be exactly `"last_query"` — the server binds the \
-rows from the last `execute_sql` automatically. Do NOT inline row data; \
-do NOT restate numbers in prose. If you need rows from an earlier query, \
-run that query again.
-- Emit at most 4 `<chart>` blocks. Prefer one clear chart over many.
-
-If the data can't be charted (single scalar, non-numeric result), return a \
-normal text answer WITHOUT any `<chart>` block and briefly say why.
-"""
-
-
-def _extract_chart_blocks(text: str) -> tuple[str, list[dict]]:
-    """Pull `<chart>...</chart>` JSON specs out of the final answer.
-
-    Returns (cleaned_text, specs). Invalid JSON blocks are dropped silently
-    (they'll also be stripped from the returned text so the user doesn't see
-    raw JSON).
-    """
-    specs: list[dict] = []
-
-    def _parse(match):
-        raw = match.group(1).strip()
-        # Strip optional ```json fences the model sometimes adds.
-        if raw.startswith("```"):
-            raw = raw.strip("`")
-            if raw.lower().startswith("json"):
-                raw = raw[4:].lstrip()
-        try:
-            spec = json.loads(raw)
-            if isinstance(spec, dict):
-                specs.append(spec)
-        except Exception as exc:
-            logger.warning(f"[Chart] Failed to parse chart spec: {exc}")
-        return ""  # remove the block from the visible text
-
-    cleaned = _CHART_BLOCK_RE.sub(_parse, text)
-    # Collapse any blank-line runs left behind by removed blocks.
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return cleaned, specs
-
-
-def _validate_chart(spec: dict, rows: list[dict]) -> dict | None:
-    """Validate a chart spec against actual query rows.
-
-    Returns a normalised spec dict ready for the frontend, or None if the
-    spec can't safely be plotted. We intentionally refuse to fall back to
-    guessing columns — the chart is only emitted if the spec and the data
-    actually match.
-    """
-    if not isinstance(spec, dict) or not rows:
-        return None
-
-    ctype = str(spec.get("type", "")).lower().strip()
-    if ctype not in _CHART_TYPES:
-        return None
-
-    title = str(spec.get("title", "")).strip()
-    if not title:
-        return None
-
-    columns = list(rows[0].keys()) if rows else []
-    columns_lower = {c.lower(): c for c in columns}
-
-    def _resolve(col: str) -> str | None:
-        if not isinstance(col, str):
-            return None
-        if col in columns:
-            return col
-        return columns_lower.get(col.lower())
-
-    if ctype == "table":
-        # Table: no axis validation. Frontend renders all columns.
-        return {
-            "type": "table",
-            "title": title,
-            "explanation": str(spec.get("explanation", "")).strip(),
-            "columns": columns,
-            "rows": rows,
-        }
-
-    x_col = _resolve(spec.get("x"))
-    if x_col is None:
-        return None
-
-    y_spec = spec.get("y")
-    if isinstance(y_spec, str):
-        y_cols_raw = [y_spec]
-    elif isinstance(y_spec, list):
-        y_cols_raw = [c for c in y_spec if isinstance(c, str)]
-    else:
-        return None
-
-    y_cols: list[str] = []
-    for y in y_cols_raw:
-        resolved = _resolve(y)
-        if resolved and resolved != x_col:
-            y_cols.append(resolved)
-    if not y_cols:
-        return None
-
-    # Pie / doughnut take a single series only.
-    if ctype in ("pie", "doughnut"):
-        y_cols = y_cols[:1]
-
-    # Numeric check: at least one sampled row per y-column must coerce to
-    # a number. If a column is entirely non-numeric, drop the chart rather
-    # than plot nonsense.
-    def _is_numeric(v) -> bool:
-        if isinstance(v, bool):
-            return False
-        if isinstance(v, (int, float)):
-            return True
-        if isinstance(v, str):
-            try:
-                float(v.replace(",", ""))
-                return True
-            except Exception:
-                return False
-        return False
-
-    for yc in y_cols:
-        if not any(_is_numeric(r.get(yc)) for r in rows):
-            return None
-
-    # X-axis must have ≥ 2 distinct values for a meaningful chart, except
-    # for a 1-row pie/doughnut (e.g. single category breakdown).
-    distinct_x = len({r.get(x_col) for r in rows})
-    if distinct_x < 2 and ctype not in ("pie", "doughnut"):
-        return None
-
-    return {
-        "type":        ctype,
-        "title":       title,
-        "explanation": str(spec.get("explanation", "")).strip(),
-        "x":           x_col,
-        "y":           y_cols,
-        "rows":        rows,
-    }
 
 
 # ── Response model ─────────────────────────────────────────────────────────────
@@ -314,12 +135,14 @@ def _compress_turn(prior_messages: list, new_messages: list, final_answer: str) 
         context_parts.append("SQL: " + sql_summary)
     context_line = " | ".join(context_parts) if context_parts else "No SQL executed"
 
-    # Keep context as a plain annotation — do NOT wrap in <thinking>, because
-    # persisted <thinking> blocks get replayed to the model and pollute its
-    # context with reasoning it didn't actually do.
-    compressed_answer = final_answer.strip()
-    if context_line != "No SQL executed":
-        compressed_answer = f"[Context from earlier turn — {context_line}]\n\n{compressed_answer}"
+    # Wrap in <thinking> so the model sees the pattern and continues writing
+    # thinking blocks for follow-up questions.
+    compressed_answer = (
+        f"<thinking>\n"
+        f"{context_line}\n"
+        f"</thinking>\n\n"
+        f"{final_answer.strip()}"
+    )
 
     compressed: list = [
         {"role": "user",      "content": raw_question},
@@ -470,65 +293,79 @@ class AgentOrchestrator:
         self._sources  = source_registry
         self._sessions = sessions
         self._max_iter = max_iterations
-        # Per-session locks so two concurrent requests on the same session_id
-        # don't race and corrupt history. WeakValueDictionary lets unused
-        # locks get garbage-collected once no coroutine holds a reference.
-        self._session_locks: WeakValueDictionary = WeakValueDictionary()
-        self._locks_guard: asyncio.Lock = asyncio.Lock()
-
-    async def _try_acquire_session_lock(self, session_id: str) -> asyncio.Lock | None:
-        """Atomically look up or create the session lock and acquire it.
-
-        Returns the held lock, or None if another request is already holding
-        it. The check-and-acquire happens under `_locks_guard` so two
-        requests for the same session can't both pass the `locked()` check.
-        """
-        async with self._locks_guard:
-            lock = self._session_locks.get(session_id)
-            if lock is None:
-                lock = asyncio.Lock()
-                self._session_locks[session_id] = lock
-            if lock.locked():
-                return None
-            # Lock is free; acquire it while we still hold the guard so no
-            # other coroutine can sneak in. acquire() on a free lock returns
-            # immediately without yielding.
-            await lock.acquire()
-            return lock
 
     def _build_system_prompt(self) -> str:
+        """
+        Compose the system prompt for this request.
+
+        Provider-agnostic. The static base in prompts.py knows nothing about
+        specific vendors. We assemble per-source sections by calling each
+        registered source's own `get_system_prompt_section()` — that way,
+        adding a new source type (Gmail, Oracle, SQLite, …) only requires
+        the source class to implement that method. The orchestrator never
+        special-cases by db_type or provider.
+        """
         from app.agent.prompts import SYSTEM_PROMPT
         from app.config import COMPANY_MD_PATH
 
-        prompt = SYSTEM_PROMPT
+        parts: list[str] = [SYSTEM_PROMPT]
+
+        # ── Connected sources (one-line summary, sorted db before email) ──
+        sources = list(self._sources.get_all())
+        if sources:
+            # Stable order: databases first (so the LLM sees structured data
+            # tools first), then email. Inside each group, alphabetic by name.
+            def _kind(s) -> int:
+                t = (s.get_db_type() or "").lower()
+                return 0 if t in ("mssql", "postgresql", "mysql", "sqlite", "oracle") else 1
+            sources.sort(key=lambda s: (_kind(s), s.name))
+
+            summary_lines = []
+            for s in sources:
+                try:
+                    desc = (s.description or "").strip().splitlines()[0]
+                except Exception:
+                    desc = ""
+                summary_lines.append(
+                    f"- `{s.name}` — {s.source_type.upper()} "
+                    f"({s.get_database_name()}). {desc}"
+                )
+            parts.append("\n\n## Connected sources\n\n" + "\n".join(summary_lines))
+
+            # ── Per-source guidance — each source contributes its own block ──
+            # Sources implement get_system_prompt_section() to surface their
+            # own tools, dialect rules, and routing tips. The orchestrator
+            # just stitches them together; it doesn't know what's inside.
+            sections: list[str] = []
+            for s in sources:
+                try:
+                    sec = s.get_system_prompt_section()
+                except Exception:
+                    sec = ""
+                sec = (sec or "").strip()
+                if sec:
+                    sections.append(sec)
+            if sections:
+                parts.append("\n\n## Source-specific guidance\n\n" + "\n\n".join(sections))
+        else:
+            parts.append(
+                "\n\n## Connected sources\n\n"
+                "_No sources are currently connected. Tell the user to finish "
+                "the setup wizard at `/setup` to connect a database or email._"
+            )
+
+        # ── Runtime context (date/time) ─────────────────────────────────
         now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
-        prompt += (
+        parts.append(
             "\n\n## Runtime Context\n\n"
             f"Today is `{now_ist.strftime('%Y-%m-%d')}`.\n"
             f"Current local datetime is `{now_ist.strftime('%Y-%m-%d %H:%M:%S %Z')}`.\n"
-            "Interpret relative dates such as today, yesterday, this month, last 7 days, "
-            "and last 10 days using this date and timezone unless the user specifies otherwise."
+            "Interpret relative dates such as today, yesterday, this month, "
+            "last 7 days, and last 10 days using this date and timezone unless "
+            "the user specifies otherwise."
         )
 
-        # Tell the agent how many sources are connected (names come from list_tables)
-        sources = self._sources.get_all()
-        if len(sources) == 1:
-            s = sources[0]
-            prompt += (
-                f"\n\n## Connected Database\n\n"
-                f"Source: `{s.name}` | Type: {s.get_db_type().upper()} | "
-                f"Database: {s.get_database_name()}\n"
-                "Call `list_tables` to get the full schema directory, relationships, and dialect rules."
-            )
-        elif len(sources) > 1:
-            prompt += "\n\n## Connected Databases\n\n"
-            for s in sources:
-                prompt += f"- `{s.name}` ({s.get_db_type().upper()}, db: {s.get_database_name()})\n"
-            prompt += "\nCall `list_tables(source=<name>)` for each source you need to query."
-
-        # Append company knowledge — the agent's domain map.
-        # Cached in memory with mtime invalidation so we don't re-read + re-parse
-        # the file on every question.
+        # ── Business context (cached on mtime) ──────────────────────────
         try:
             if COMPANY_MD_PATH.exists():
                 mtime = COMPANY_MD_PATH.stat().st_mtime
@@ -537,11 +374,11 @@ class AgentOrchestrator:
                     _COMPANY_MD_CACHE["content"] = COMPANY_MD_PATH.read_text(encoding="utf-8").strip()
                 content = _COMPANY_MD_CACHE["content"]
                 if content:
-                    prompt += f"\n\n## Business Context\n\n{content}"
+                    parts.append(f"\n\n## Business Context\n\n{content}")
         except Exception:
             pass
 
-        return prompt
+        return "".join(parts)
 
     # ── Non-streaming ─────────────────────────────────────────────────────────
 
@@ -549,12 +386,18 @@ class AgentOrchestrator:
         self,
         question: str,
         session_id: Optional[str] = None,
+        *,
+        visualise: bool = False,
     ) -> AgentResponse:
-        """Run the agent loop to completion and return an AgentResponse."""
+        """Run the agent loop to completion and return an AgentResponse.
+
+        `visualise` is accepted for forward compatibility with the chart-spec
+        feature; today it's surfaced via the route but the loop ignores it.
+        """
         sid = self._sessions.get_or_create(session_id)
 
         events: list[dict] = []
-        async for event in self.ask_stream(question, sid):
+        async for event in self.ask_stream(question, sid, visualise=visualise):
             events.append(event)
 
         for event in reversed(events):
@@ -583,51 +426,19 @@ class AgentOrchestrator:
         self,
         question: str,
         session_id: Optional[str] = None,
+        *,
         visualise: bool = False,
     ) -> AsyncGenerator[dict, None]:
         """Run the ReAct loop and yield SSE-friendly progress events.
 
-        When ``visualise`` is True, the agent is prompted to emit one or more
-        ``<chart>`` JSON blocks inside its final answer. The orchestrator
-        extracts those blocks, validates them, binds them to the actual rows
-        returned by ``execute_sql`` (so numbers can't be hallucinated), and
-        yields a ``chart`` SSE event per valid spec.
+        When `visualise=True` the `render_chart` tool is included in the
+        tool list and the system prompt nudges the model to call it once it
+        has the data. When False (default), the chart tool is hidden so the
+        model isn't tempted into spurious chart calls on plain text Qs.
         """
         from app.ai.client import RateLimitExhausted
 
-        session_id = self._sessions.get_or_create(session_id)
-
-        # ── Per-session lock ──────────────────────────────────────────────────
-        # Two concurrent requests on the same session_id would race to mutate
-        # and persist history. Reject the second one with a clear error.
-        lock = await self._try_acquire_session_lock(session_id)
-        if lock is None:
-            yield {
-                "type":    "error",
-                "message": (
-                    "Another request is already in progress for this session. "
-                    "Wait for it to finish or start a new session."
-                ),
-            }
-            return
-
-        try:
-            async for event in self._ask_stream_locked(
-                question, session_id, visualise=visualise
-            ):
-                yield event
-        finally:
-            if lock.locked():
-                lock.release()
-
-    async def _ask_stream_locked(
-        self,
-        question: str,
-        session_id: str,
-        visualise: bool = False,
-    ) -> AsyncGenerator[dict, None]:
-        from app.ai.client import RateLimitExhausted
-
+        session_id     = self._sessions.get_or_create(session_id)
         # Always strip on load — legacy sessions may contain tool_use/tool_result
         # blocks from before the pruning pass was added. Trim now so they never
         # bloat the next LLM request.
@@ -639,50 +450,50 @@ class AgentOrchestrator:
         # so we inject the hint only on turn 2 (exactly one prior turn). Always
         # restate the <thinking> requirement on every follow-up because the UI
         # streaming depends on it.
+        #
+        # Provider-agnostic: the hint doesn't name any specific tool. The
+        # rule "if the user pivots to a different source, you may need to
+        # orient again" works for both email-first and database-first sessions.
         prior_turn_count  = sum(1 for m in messages if m.get("role") == "user")
         user_content: str = question
         if prior_turn_count == 1:
             user_content = (
                 question
-                + "\n\n[Follow-up: skip list_tables (already done earlier). "
-                "Begin with a <thinking> block, then call get_table_schema for "
-                "the specific tables you need.]"
+                + "\n\n[Follow-up turn: begin with a <thinking> block. "
+                "If this question targets the same source you used last turn, "
+                "you can skip the orientation call (e.g. list_tables) and go "
+                "straight to schema lookup or query. If it targets a different "
+                "source, orient yourself there first.]"
             )
         elif prior_turn_count >= 2:
             user_content = question + "\n\n[Begin with a <thinking> block.]"
-
-        # ── Visualise nudge: attach on every turn where chart mode is on ────
-        # The system prompt carries the full spec rules, but the model tends
-        # to pattern-match to the *conversation* — if prior turns were text,
-        # it often keeps answering in text. A short inline reminder on the
-        # current user turn is the most reliable way to get a chart block.
-        if visualise:
-            user_content = (
-                user_content
-                + "\n\n[VISUALISE MODE: the user toggled Chart format for this "
-                "question. Your final message MUST include at least one "
-                "<chart data=\"last_query\"> JSON block (see system instructions "
-                "for the full spec), unless the result is a single scalar or "
-                "truly non-chartable — in which case briefly explain why in "
-                "text. Do not restate the numbers in prose; let the chart show "
-                "them.]"
-            )
 
         messages.append({"role": "user", "content": user_content})
 
         system           = self._build_system_prompt()
         if visualise:
-            system = system + "\n\n" + _VISUALISE_INSTRUCTIONS
+            system += (
+                "\n\n## Visualisation Mode\n\n"
+                "The user asked for a chart. Plan:\n"
+                "  1. Query the data with the appropriate tool (execute_sql, "
+                "     search_emails, etc.) and inspect the rows.\n"
+                "  2. Call `render_chart` exactly once. Pass the rows you "
+                "     already retrieved (do NOT re-query). Pick the chart "
+                "     `type` that fits the data:\n"
+                "       - `bar` for category comparisons,\n"
+                "       - `line` or `area` for time series,\n"
+                "       - `pie`/`doughnut` for parts of a whole (≤8 slices, single y),\n"
+                "       - `table` if no chart shape fits.\n"
+                "     Cap rows at 200; aggregate or top-N if the result is larger.\n"
+                "  3. After render_chart succeeds, give the user a brief "
+                "     1-3 sentence text answer describing the result. Do NOT "
+                "     restate the data — the chart already shows it.\n"
+                "If the question genuinely doesn't have a numerical answer "
+                "to chart, skip render_chart and answer in text.\n"
+            )
         tools_used: list = []
         queries_executed = 0
         iteration        = 0
-
-        # Chart-mode bookkeeping. When visualise is on we keep the rows returned
-        # by every execute_sql call during this turn (keyed by tool_use_id),
-        # plus a pointer to the last SQL call. Chart specs bind to rows here
-        # — the model never re-serializes the numbers, so they can't drift.
-        sql_rows_by_id: dict[str, list[dict]] = {}
-        last_sql_tool_id: str | None          = None
 
         yield {"type": "status", "message": "Starting analysis…"}
 
@@ -694,25 +505,16 @@ class AgentOrchestrator:
 
                 # ── Two iterations before limit, remove tools to force answer ─
                 force_final = (iteration >= self._max_iter - 2)
-                call_tools  = None if force_final else self._registry.get_api_definitions()
-
-                # On force_final, override the system prompt's "always write a
-                # <thinking> block" rule. Otherwise the model sometimes wraps
-                # its entire response inside <thinking>, the stripper removes
-                # it, and the user sees an empty answer.
-                call_system = system
                 if force_final:
+                    call_tools = None
                     logger.info("[Agent] Forcing final answer — tools disabled")
                     yield {"type": "status", "message": "Composing final answer…"}
-                    call_system = (
-                        system
-                        + "\n\n## FINAL ANSWER MODE\n\n"
-                        "Write the final answer to the user NOW using the data "
-                        "already gathered.\n"
-                        "- DO NOT write a <thinking> block. Write the answer directly.\n"
-                        "- DO NOT call any tools.\n"
-                        "- Lead with the key number or finding. Be concrete."
-                    )
+                else:
+                    call_tools = self._registry.get_api_definitions()
+                    if not visualise:
+                        # Hide render_chart from the LLM in text mode so it
+                        # doesn't get tempted into spurious chart calls.
+                        call_tools = [t for t in call_tools if t.get("name") != "render_chart"]
 
                 # ── LLM call (streaming) ──────────────────────────────────────
                 response    = None
@@ -722,7 +524,7 @@ class AgentOrchestrator:
                 try:
                     async for evt in self._ai.complete_stream(
                         messages=messages,
-                        system=call_system,
+                        system=system,
                         tools=call_tools,
                     ):
                         et = evt.get("type")
@@ -782,12 +584,7 @@ class AgentOrchestrator:
                     if thinking_open:
                         yield {"type": "thinking_end"}
                     self._sessions.set_messages(session_id, _strip_tool_blocks(prior_messages))
-                    logger.exception("[Agent] LLM stream failed")
-                    yield {
-                        "type":    "error",
-                        "message": "The AI provider returned an error. Please try again.",
-                        "detail":  type(exc).__name__,
-                    }
+                    yield {"type": "error", "message": str(exc)}
                     return
 
                 # Flush any trailing buffered chars (e.g. partial tag suffix left over)
@@ -830,134 +627,18 @@ class AgentOrchestrator:
 
                 # ── Done ──────────────────────────────────────────────────────
                 if stop_reason == "end_turn":
-                    answer = "\n\n".join(text_remainder).strip()
-
-                    # Visualise mode: strip out any <chart> blocks from the
-                    # visible answer and emit them as separate chart events
-                    # bound to the actual SQL rows.
-                    chart_events: list[dict] = []
-                    if visualise:
-                        answer, chart_specs = _extract_chart_blocks(answer)
-                        if chart_specs and not sql_rows_by_id:
-                            logger.warning(
-                                "[Chart] Model emitted chart specs but no "
-                                "execute_sql result was captured this turn."
-                            )
-                        for spec in chart_specs[:_MAX_CHARTS_PER_TURN]:
-                            # Resolve which query's rows to use. Default to
-                            # last_query; allow an explicit tool_use_id only
-                            # if we actually have it.
-                            data_ref = str(spec.get("data", "last_query")).strip()
-                            rows: list[dict] = []
-                            if data_ref == "last_query" and last_sql_tool_id:
-                                rows = sql_rows_by_id.get(last_sql_tool_id, [])
-                            elif data_ref in sql_rows_by_id:
-                                rows = sql_rows_by_id[data_ref]
-                            elif last_sql_tool_id:
-                                rows = sql_rows_by_id.get(last_sql_tool_id, [])
-
-                            validated = _validate_chart(spec, rows)
-                            if validated:
-                                chart_events.append(validated)
-                            else:
-                                logger.info(
-                                    f"[Chart] Dropped invalid spec: "
-                                    f"type={spec.get('type')!r} x={spec.get('x')!r} "
-                                    f"y={spec.get('y')!r}"
-                                )
-
-                    logger.info(
-                        f"[Agent] Final answer: {answer[:300]} "
-                        f"({len(chart_events)} chart(s))"
-                    )
-
-                    # Fail loud on empty answer. Correct answer or explicit
-                    # error — never a silent empty bubble. This happens when
-                    # the model wraps its whole response in <thinking> and
-                    # the stripper removes everything.
-                    # In visualise mode, a chart alone is a valid answer, so
-                    # only bail if there's no text AND no charts.
-                    if not answer and not chart_events:
-                        logger.warning(
-                            "[Agent] end_turn with empty answer — rolling back turn"
-                        )
-                        self._sessions.set_messages(
-                            session_id, _strip_tool_blocks(prior_messages)
-                        )
-                        yield {
-                            "type":    "error",
-                            "message": (
-                                "The agent finished without producing an answer. "
-                                "This usually clears up on retry."
-                            ),
-                        }
-                        return
+                    answer = "\n\n".join(text_remainder)
+                    logger.info(f"[Agent] Final answer: {answer[:300]}")
 
                     # Compress this turn: replace full tool call/result chains
                     # with a compact 2-message summary to keep context lean.
-                    # Note: persist only the text answer — charts are a
-                    # UI-only artifact and should not be replayed to the LLM.
                     new_messages = messages[len(prior_messages):]
-                    answer_for_history = answer or "(chart-only answer)"
-                    compressed   = _compress_turn(
-                        prior_messages, new_messages, answer_for_history
-                    )
+                    compressed   = _compress_turn(prior_messages, new_messages, answer)
                     # Defense-in-depth: strip any stray tool_use/tool_result blocks
                     # before persisting. prior_messages is already clean from the
                     # previous turn, but compressed may contain inline tool blocks
                     # if _compress_turn ever changes.
                     self._sessions.set_messages(session_id, _strip_tool_blocks(compressed))
-
-                    # Emit chart events before the answer so the UI can render
-                    # them in order and the final `answer` event signals "done".
-                    # Note: the chart dict has its own `type` field (bar/line/…),
-                    # so nest it under `spec` to keep the SSE event's own
-                    # `type: "chart"` discriminator intact.
-                    for ch in chart_events:
-                        yield {"type": "chart", "spec": ch}
-
-                    # ── Persist the UI-facing transcript ──────────────────────
-                    # Store a compact, UI-shaped record of this turn so the
-                    # sidebar and "resume conversation" features can replay
-                    # it exactly as it originally rendered. The LLM never
-                    # sees this log — it's purely for the frontend.
-                    now_ts = time.time()
-                    badges = [
-                        f"{queries_executed} quer"
-                        f"{'y' if queries_executed == 1 else 'ies'}",
-                        f"{iteration} step"
-                        f"{'' if iteration == 1 else 's'}",
-                    ]
-                    if chart_events:
-                        badges.append(
-                            f"{len(chart_events)} chart"
-                            f"{'' if len(chart_events) == 1 else 's'}"
-                        )
-                    user_entry = {
-                        "role": "user",
-                        "text": question,
-                        "ts":   now_ts,
-                    }
-                    ai_entry: dict = {
-                        "role":   "ai",
-                        "text":   answer,
-                        "ts":     now_ts,
-                        "badges": badges,
-                    }
-                    if chart_events:
-                        ai_entry["charts"] = chart_events
-                    try:
-                        self._sessions.append_display_entries(
-                            session_id,
-                            [user_entry, ai_entry],
-                            first_user_text_if_empty=question,
-                        )
-                    except Exception:
-                        # The display log is best-effort — never fail a turn
-                        # because we couldn't persist the UI transcript.
-                        logger.exception(
-                            "[Agent] Failed to append display log"
-                        )
 
                     yield {
                         "type":             "answer",
@@ -966,7 +647,6 @@ class AgentOrchestrator:
                         "iterations":       iteration,
                         "tools_used":       tools_used,
                         "queries_executed": queries_executed,
-                        "chart_count":      len(chart_events),
                     }
                     return
 
@@ -986,15 +666,22 @@ class AgentOrchestrator:
 
                         if tool_name == "execute_sql":
                             queries_executed += 1
-                            # Capture the rows so visualise mode can bind
-                            # charts to real data (never re-serialised by
-                            # the LLM). Only tracked when we're actually
-                            # going to use them, to save memory.
-                            if visualise and not result.is_error:
-                                rows = (result.metadata or {}).get("rows_for_chart") or []
-                                if rows:
-                                    sql_rows_by_id[tool_id] = rows
-                                    last_sql_tool_id = tool_id
+
+                        # Chart-tool side effect: surface the validated spec
+                        # to the frontend via SSE so it renders inside the
+                        # AI message card. Only emit on success — on a bad
+                        # spec the tool returns is_error=True, the LLM gets
+                        # the validation message back, and can correct + retry.
+                        if (
+                            tool_name == "render_chart"
+                            and not result.is_error
+                            and isinstance(result.metadata, dict)
+                            and "chart_spec" in result.metadata
+                        ):
+                            yield {
+                                "type": "chart",
+                                "spec": result.metadata["chart_spec"],
+                            }
 
                         logger.info(
                             f"[Agent] Tool result ({tool_name}): {result.content[:300]}"
@@ -1035,28 +722,7 @@ class AgentOrchestrator:
                 "message": "Agent reached the step limit without a final answer. Try a more specific question.",
             }
 
-        except (asyncio.CancelledError, GeneratorExit):
-            # Client disconnected mid-stream (Stop button, closed tab, dropped
-            # connection). Roll the session back to its pre-question state so
-            # the next request doesn't see a dangling assistant tool_use block
-            # with no matching tool_result.
-            logger.info(
-                f"[Agent] Stream cancelled for session {session_id} "
-                f"(iteration {iteration}). Rolling back turn."
-            )
-            try:
-                self._sessions.set_messages(
-                    session_id, _strip_tool_blocks(prior_messages)
-                )
-            except Exception:
-                logger.exception("[Agent] Failed to roll back session on cancel")
-            raise
         except Exception as exc:
             logger.exception("[AgentOrchestrator] Unhandled error in ask_stream")
             self._sessions.set_messages(session_id, _strip_tool_blocks(prior_messages))
-            # Don't echo raw exception text to clients — could leak internals.
-            # The full exception is already in the server log.
-            yield {
-                "type":    "error",
-                "message": "The agent encountered an unexpected error. Please try again.",
-            }
+            yield {"type": "error", "message": f"Agent error: {exc}"}

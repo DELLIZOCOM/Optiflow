@@ -31,10 +31,11 @@ _LEGACY_AI_PATH    = CONFIG_DIR / "model_config.json"  # backward compat
 COMPANY_MD_PATH    = KNOWLEDGE_DIR / "company.md"
 SECURITY_PATH      = CONFIG_DIR / "security.json"
 
-# Email integration — one Outlook tenant per install (admin-consent)
-EMAIL_CONFIG_DIR   = CONFIG_DIR / "email"
+# Email integration — at most one provider connected at a time (Outlook OR IMAP)
+EMAIL_CONFIG_DIR    = CONFIG_DIR / "email"
 OUTLOOK_CONFIG_PATH = EMAIL_CONFIG_DIR / "outlook.json"
-EMAIL_DB_PATH      = CACHE_DIR / "email.db"
+IMAP_CONFIG_PATH    = EMAIL_CONFIG_DIR / "imap.json"
+EMAIL_DB_PATH       = CACHE_DIR / "email.db"
 
 
 # ── AI config ─────────────────────────────────────────────────────────────────
@@ -227,7 +228,137 @@ def delete_outlook_config() -> None:
 
 def is_email_configured() -> bool:
     cfg = load_outlook_config()
-    return bool(cfg and cfg.get("tenant_id") and cfg.get("client_id") and cfg.get("client_secret"))
+    if cfg and cfg.get("tenant_id") and cfg.get("client_id") and cfg.get("client_secret"):
+        return True
+    icfg = load_imap_config()
+    return bool(icfg and icfg.get("host") and (icfg.get("mailboxes") or []))
+
+
+# ── Email (IMAP / GoDaddy / generic) credentials ──────────────────────────────
+
+def load_imap_config() -> Optional[dict]:
+    """
+    Load IMAP config. Returns:
+      {
+        provider:            "godaddy" | "generic",
+        tenant_display_name: str,
+        host:                str,
+        port:                int,
+        use_ssl:             bool,
+        backfill_days:       int,
+        mailboxes: [
+          { account_email, password, display_name?, folder },   # password decrypted
+          ...
+        ],
+        added_at:            float,
+        added_by:            str,
+      }
+    Returns None when not configured. Per-mailbox passwords are decrypted.
+    """
+    if not IMAP_CONFIG_PATH.exists():
+        return None
+    from app.utils.crypto import decrypt_secret
+    try:
+        with open(IMAP_CONFIG_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as e:
+        logger.warning(f"Could not load imap.json: {e}")
+        return None
+
+    mailboxes_in = raw.get("mailboxes") or []
+    mailboxes_out: list[dict] = []
+    for mb in mailboxes_in:
+        if not isinstance(mb, dict):
+            continue
+        addr = (mb.get("account_email") or "").strip()
+        if not addr:
+            continue
+        pw = mb.get("password", "")
+        try:
+            pw_plain = decrypt_secret(pw) if pw else ""
+        except Exception:
+            pw_plain = ""
+        mailboxes_out.append({
+            "account_email": addr,
+            "password":      pw_plain,
+            "display_name":  (mb.get("display_name") or "").strip() or None,
+            "folder":        (mb.get("folder") or "INBOX").strip() or "INBOX",
+        })
+
+    return {
+        "provider":            (raw.get("provider") or "generic"),
+        "tenant_display_name": raw.get("tenant_display_name", ""),
+        "host":                raw.get("host", ""),
+        "port":                int(raw.get("port", 993)),
+        "use_ssl":             bool(raw.get("use_ssl", True)),
+        "backfill_days":       int(raw.get("backfill_days", 365)),
+        "mailboxes":           mailboxes_out,
+        "added_at":            raw.get("added_at", 0),
+        "added_by":            raw.get("added_by", ""),
+    }
+
+
+def save_imap_config(data: dict) -> None:
+    """Persist IMAP config; per-mailbox passwords Fernet-encrypted at rest."""
+    from app.utils.crypto import encrypt_secret, is_encrypted
+    import time as _time
+
+    mailboxes_in = data.get("mailboxes") or []
+    mailboxes_out: list[dict] = []
+    for mb in mailboxes_in:
+        if not isinstance(mb, dict):
+            continue
+        addr = (mb.get("account_email") or "").strip().lower()
+        if not addr:
+            continue
+        pw = mb.get("password", "")
+        if pw and not is_encrypted(pw):
+            pw = encrypt_secret(pw)
+        mailboxes_out.append({
+            "account_email": addr,
+            "password":      pw,
+            "display_name":  (mb.get("display_name") or "").strip() or None,
+            "folder":        (mb.get("folder") or "INBOX").strip() or "INBOX",
+        })
+
+    cfg = {
+        "provider":            (data.get("provider") or "generic").strip().lower(),
+        "tenant_display_name": (data.get("tenant_display_name") or "").strip(),
+        "host":                (data.get("host") or "").strip(),
+        "port":                int(data.get("port", 993)),
+        "use_ssl":             bool(data.get("use_ssl", True)),
+        "backfill_days":       int(data.get("backfill_days", 365)),
+        "mailboxes":           mailboxes_out,
+        "added_at":            data.get("added_at") or _time.time(),
+        "added_by":            data.get("added_by", ""),
+    }
+    os.makedirs(EMAIL_CONFIG_DIR, exist_ok=True)
+    with open(IMAP_CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+    try:
+        os.chmod(IMAP_CONFIG_PATH, 0o600)
+    except OSError:
+        pass
+    logger.info("IMAP config saved to data/config/email/imap.json")
+
+
+def delete_imap_config() -> None:
+    """Remove the IMAP credentials file. Does NOT touch email.db."""
+    if IMAP_CONFIG_PATH.exists():
+        IMAP_CONFIG_PATH.unlink()
+        logger.info("IMAP config deleted")
+
+
+def active_email_provider() -> Optional[str]:
+    """
+    Return the provider name of the currently configured email source, or None.
+    Outlook wins if both are present (shouldn't happen in practice).
+    """
+    if OUTLOOK_CONFIG_PATH.exists():
+        return "outlook"
+    if IMAP_CONFIG_PATH.exists():
+        return "imap"
+    return None
 
 
 def is_ai_configured() -> bool:

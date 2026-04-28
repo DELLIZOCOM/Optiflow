@@ -1,0 +1,447 @@
+/* ============================================================================
+   OptiFlow AI — Email dashboard page
+   Layered on top of setup.css (shares tokens, forms, buttons, status, info-box).
+   ============================================================================ */
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.header-home {
+  color: #9ca3af;
+  font-size: 13px;
+  text-decoration: none;
+  padding: 6px 12px;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: var(--radius-sm);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.header-home:hover {
+  color: var(--fg-invert);
+  border-color: rgba(255,255,255,0.25);
+  background: rgba(255,255,255,0.05);
+}
+
+/* ── Top status bar ──────────────────────────────────────────────────────── */
+
+.email-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 18px;
+  margin-bottom: 18px;
+  box-shadow: var(--shadow-sm);
+  font-size: 13.5px;
+  color: var(--fg-secondary);
+}
+.email-status-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+}
+.status-dot.live    { background: var(--success); box-shadow: 0 0 0 3px rgba(5,150,105,0.15); }
+.status-dot.pending { background: var(--warn);    box-shadow: 0 0 0 3px rgba(217,119,6,0.15); }
+.status-dot.off     { background: var(--fg-faint); }
+.status-dot.error   { background: var(--danger);  box-shadow: 0 0 0 3px rgba(220,38,38,0.15); }
+
+.btn-sm {
+  padding: 6px 12px !important;
+  font-size: 12.5px !important;
+}
+
+/* ── Dashboard header ────────────────────────────────────────────────────── */
+
+.dashboard-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.dashboard-header .panel-subtitle { margin-bottom: 0; }
+.dashboard-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ── Stat grid ───────────────────────────────────────────────────────────── */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.stat-card {
+  background: var(--bg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+}
+.stat-val {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--fg-primary);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.stat-lbl {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-top: 4px;
+  font-weight: 500;
+}
+.stat-sub {
+  font-size: 11.5px;
+  color: var(--fg-faint);
+  margin-top: 4px;
+}
+
+/* ── Section + error list ────────────────────────────────────────────────── */
+
+.section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg-secondary);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.error-list {
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.error-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 2fr;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--danger-soft);
+  color: #991b1b;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--danger-border);
+}
+.error-row:last-child { border-bottom: none; }
+.error-mailbox {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  word-break: break-all;
+}
+.error-msg {
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* ── Danger button variant ───────────────────────────────────────────────── */
+
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+}
+.btn-danger:not(:disabled):hover { background: #b91c1c; }
+
+/* ── Modal ───────────────────────────────────────────────────────────────── */
+
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+  animation: fadeIn 0.15s ease;
+}
+.modal {
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  max-width: 460px;
+  width: 100%;
+  padding: 24px 26px;
+  animation: modalPop 0.18s ease;
+}
+@keyframes modalPop {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+.modal-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--fg-primary);
+  margin-bottom: 10px;
+}
+.modal-body {
+  font-size: 13.5px;
+  color: var(--fg-secondary);
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+.modal-body p { margin-bottom: 10px; }
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-border);
+  color: #92400e;
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.checkbox-row input { margin-top: 2px; flex-shrink: 0; }
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.modal-actions .spacer { flex: 1; }
+
+.email-status-right {
+  display: flex;
+  gap: 6px;
+}
+.status-cadence {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+/* ── Section headers (Mailboxes / Recent activity) ───────────────────────── */
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.section-header .section-title { margin-bottom: 0; }
+.section-meta {
+  font-size: 11.5px;
+  color: var(--fg-faint);
+}
+#mailbox-table-section,
+#activity-section {
+  margin-bottom: 24px;
+}
+
+/* ── Mailbox management table ────────────────────────────────────────────── */
+
+.mailbox-table {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+.mb-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) 110px 110px 1fr auto;
+  gap: 14px;
+  padding: 12px 16px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.mb-row:last-child { border-bottom: none; }
+.mb-row.is-disabled { opacity: 0.6; }
+.mb-row.is-error    { background: var(--danger-soft); }
+.mb-head {
+  background: var(--bg-muted);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+.mb-cell-email {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.mb-cell-email .mb-email-addr {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--fg-primary);
+  word-break: break-all;
+}
+.mb-cell-email .mb-display-name {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.mb-cell-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.mb-cell-status .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+  flex-shrink: 0;
+}
+.mb-cell-status.ok       { color: var(--success); }
+.mb-cell-status.ok       .dot { background: var(--success); }
+.mb-cell-status.pending  { color: var(--warn); }
+.mb-cell-status.pending  .dot { background: var(--warn); }
+.mb-cell-status.error    { color: var(--danger); }
+.mb-cell-status.error    .dot { background: var(--danger); }
+.mb-cell-status.disabled { color: var(--fg-faint); }
+.mb-cell-count,
+.mb-cell-sync {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--fg-secondary);
+}
+.mb-cell-meta {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  word-break: break-word;
+  line-height: 1.45;
+}
+.mb-cell-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ── Inline add-mailbox form ─────────────────────────────────────────────── */
+
+.inline-add-mailbox {
+  background: var(--bg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  margin-bottom: 12px;
+}
+.inline-add-mailbox .btn-row { margin-top: 10px; }
+
+/* ── Activity feed ───────────────────────────────────────────────────────── */
+
+.activity-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+.activity-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 2fr auto;
+  gap: 14px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  align-items: baseline;
+}
+.activity-row:last-child { border-bottom: none; }
+.activity-from {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.activity-from .from-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--fg-primary);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.activity-from .from-email {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.activity-body {
+  min-width: 0;
+}
+.activity-body .activity-subject {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--fg-primary);
+  margin-bottom: 2px;
+}
+.activity-body .activity-snip {
+  font-size: 12px;
+  color: var(--fg-secondary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.activity-body .activity-mailbox {
+  font-size: 11px;
+  color: var(--fg-faint);
+  margin-top: 4px;
+  font-family: var(--font-mono);
+}
+.activity-time {
+  font-size: 11.5px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.activity-empty {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+.attach-pin {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--fg-faint);
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 760px) {
+  .mb-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .mb-head { display: none; }
+  .mb-cell-meta { grid-column: 1 / -1; }
+  .mb-cell-actions { grid-column: 1 / -1; }
+  .activity-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .activity-time { justify-self: end; }
+}
+
+@media (max-width: 640px) {
+  .dashboard-actions { width: 100%; }
+  .dashboard-actions .btn { flex: 1; justify-content: center; }
+  .header-inner { flex-direction: column; align-items: flex-start; }
+  .error-row { grid-template-columns: 1fr; gap: 4px; }
+}

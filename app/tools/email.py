@@ -1,9 +1,11 @@
 """
-Agent tools for the Outlook email source.
+Agent tools for any email source.
 
-All four tools read from the EmailStore backing the registered OutlookSource.
-They are registered into the ToolRegistry when at least one email source is
-connected at startup.
+Provider-agnostic: all four tools read from an `EmailStore` instance, which
+is the same shape regardless of which ingestor (Outlook / IMAP / a future
+Gmail connector) populated it. The store gets handed to `register_email_tools`
+when the source comes up; adding a new email provider only needs a new
+`EmailSource` subclass that writes into `EmailStore` — these tools don't change.
 """
 
 import json
@@ -24,7 +26,7 @@ def _fmt_ts(ts: Optional[float]) -> str:
 
 def _summarize_row(r: dict) -> dict:
     """Trim an email row for compact tool output."""
-    return {
+    out = {
         "id":               r.get("id"),
         "mailbox":          r.get("account_email"),
         "subject":          r.get("subject") or "(no subject)",
@@ -37,6 +39,13 @@ def _summarize_row(r: dict) -> dict:
         "conversation_id":  r.get("conversation_id"),
         "preview":          r.get("preview"),
     }
+    # When search() runs in conversation-grouped mode (the default), each row
+    # represents a whole thread. Surface thread size + last-received so the
+    # agent can decide whether to call get_email_thread for the full chain.
+    if "thread_message_count" in r:
+        out["thread_message_count"] = r.get("thread_message_count")
+        out["thread_last_received"] = _fmt_ts(r.get("thread_last_received"))
+    return out
 
 
 class ListMailboxesTool(BaseTool):
@@ -80,12 +89,16 @@ class ListMailboxesTool(BaseTool):
 class SearchEmailsTool(BaseTool):
     name = "search_emails"
     description = (
-        "Search indexed company email using BM25 full-text ranking. "
+        "Search indexed company email using BM25 full-text ranking with time-decay "
+        "boosting (recent messages outrank old ones at similar relevance). Results "
+        "are grouped by conversation by default — one row per thread, with "
+        "thread_message_count showing how many messages are in the thread. "
         "Provide 2-6 keyword variants (synonyms, abbreviations, exact IDs). "
         "Optional filters: mailbox (exact address), sender (name or address substring), "
         "recipient (substring), date_range ('last_7_days' | 'last_30_days' | "
-        "'YYYY-MM-DD..YYYY-MM-DD'), folder, has_attachments. "
-        "Returns a ranked list with preview snippets. Do NOT invent email ids."
+        "'YYYY-MM-DD..YYYY-MM-DD'), folder, has_attachments. Set "
+        "group_by_conversation=false if you specifically need every matching "
+        "message rather than one-per-thread. Do NOT invent email ids."
     )
     parameters = {
         "type": "object",
@@ -98,6 +111,10 @@ class SearchEmailsTool(BaseTool):
             "folder":           {"type": "string"},
             "has_attachments":  {"type": "boolean"},
             "limit":            {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+            "group_by_conversation": {
+                "type": "boolean",
+                "description": "Default true. Set false to get every matching message instead of one row per thread.",
+            },
         },
         "required": ["keywords"],
         "additionalProperties": False,
@@ -124,6 +141,7 @@ class SearchEmailsTool(BaseTool):
                 folder=input.get("folder"),
                 has_attachments=input.get("has_attachments"),
                 limit=int(input.get("limit") or 10),
+                group_by_conversation=bool(input.get("group_by_conversation", True)),
             )
         except Exception as e:
             logger.exception("search_emails failed")
@@ -236,14 +254,159 @@ class GetEmailThreadTool(BaseTool):
         return ToolResult(tool_call_id="", content=text)
 
 
+class LookupEntityTool(BaseTool):
+    """
+    Resolve a person/organization name or email address to a canonical
+    entity record with all known aliases. The agent should call this BEFORE
+    `search_emails(sender=...)` whenever the user names a contact by their
+    real-world name (e.g. "Acme Corp", "John Smith") so it gets every email
+    address that person uses, not just the most recent one.
+
+    Returns a small JSON record:
+        {
+          "found": true,
+          "entity": {
+            "entity_id": 42,
+            "kind": "customer" | "vendor" | "employee" | "unknown",
+            "display_name": "Acme Corp",
+            "company": "Acme Corp Ltd.",
+            "confidence": 1.0,
+            "emails": ["a@acme.io", "billing@acme.io"]
+          },
+          "candidates": [...]    # if multiple weak matches
+        }
+    """
+
+    name = "lookup_entity"
+    description = (
+        "Resolve a person's name, organization, or email address to a "
+        "canonical entity with all known email addresses. Call this when "
+        "the user names a contact ('Acme', 'John Smith', 'the supplier') "
+        "before searching email — you'll get every alias they've ever used "
+        "instead of guessing one address. Cheap (sub-millisecond), safe to "
+        "call early in the plan."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Either an email address (exact match) or a display "
+                    "name / company name (substring + token match)."
+                ),
+            },
+            "kind": {
+                "type": "string",
+                "enum": ["customer", "vendor", "employee", "unknown"],
+                "description": (
+                    "Optional filter — restrict to entities of this kind. "
+                    "Omit to search across all kinds."
+                ),
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max name-match candidates to return (default 5).",
+            },
+        },
+        "required": ["query"],
+    }
+
+    def __init__(self, store):
+        self._store = store
+
+    async def execute(self, input: dict) -> ToolResult:
+        q     = (input.get("query") or "").strip()
+        kind  = (input.get("kind") or "").strip().lower() or None
+        limit = int(input.get("limit") or 5)
+        if not q:
+            return ToolResult(
+                tool_call_id="",
+                content="lookup_entity: query is required.",
+                is_error=True,
+            )
+
+        store = self._store
+
+        # Email address path → exact match wins outright
+        if "@" in q:
+            ent = store.find_entity_by_email(q)
+            if ent and (kind is None or ent.get("kind") == kind):
+                return ToolResult(
+                    tool_call_id="",
+                    content=json.dumps({"found": True, "match_type": "email", "entity": _strip_entity(ent)}, indent=2),
+                )
+            # Even if not in entities table, the address itself is a usable answer.
+            return ToolResult(
+                tool_call_id="",
+                content=json.dumps({
+                    "found": False,
+                    "match_type": "email",
+                    "note": "Address not yet linked to an entity; you can still pass it to search_emails(sender=...).",
+                    "address": store._norm_email(q),
+                }, indent=2),
+            )
+
+        # Name path → ranked candidates
+        candidates = store.find_entities_by_name(q, limit=max(1, limit))
+        if kind:
+            candidates = [c for c in candidates if c.get("kind") == kind]
+
+        if not candidates:
+            return ToolResult(
+                tool_call_id="",
+                content=json.dumps({
+                    "found": False,
+                    "match_type": "name",
+                    "query": q,
+                    "note": (
+                        "No matching entity. Either the contact has not been "
+                        "discovered yet (auto-discovery runs on each email "
+                        "sync) or the spelling differs. Try search_emails "
+                        "with the name as a keyword instead."
+                    ),
+                }, indent=2),
+            )
+
+        primary = candidates[0]
+        rest    = [_strip_entity(c) for c in candidates[1:]]
+        return ToolResult(
+            tool_call_id="",
+            content=json.dumps({
+                "found":      True,
+                "match_type": "name",
+                "entity":     _strip_entity(primary),
+                "candidates": rest,
+            }, indent=2),
+        )
+
+
+def _strip_entity(d: dict) -> dict:
+    """Compact entity record for tool output — drops noisy timestamps."""
+    return {
+        "entity_id":      d.get("entity_id"),
+        "kind":           d.get("kind"),
+        "display_name":   d.get("display_name"),
+        "company":        d.get("company"),
+        "notes":          d.get("notes"),
+        "confidence":     d.get("confidence"),
+        "emails":         [e.get("email_address") for e in (d.get("emails") or [])],
+    }
+
+
 def register_email_tools(registry, store) -> None:
     """
-    Register all four email tools into a ToolRegistry, bound to the given EmailStore.
+    Register all five email-stack tools into a ToolRegistry, bound to the
+    given EmailStore. Provider-agnostic — call from any EmailSource's install
+    path (Outlook, IMAP, or any future provider).
 
-    Call this from startup after the OutlookSource is initialized.
+    The five tools:
+      list_mailboxes, search_emails, get_email, get_email_thread, lookup_entity
     """
     registry.register(ListMailboxesTool(store))
     registry.register(SearchEmailsTool(store))
     registry.register(GetEmailTool(store))
     registry.register(GetEmailThreadTool(store))
-    logger.info("Registered 4 email tools (list_mailboxes, search_emails, get_email, get_email_thread)")
+    registry.register(LookupEntityTool(store))
+    logger.info("Registered 5 email tools "
+                "(list_mailboxes, search_emails, get_email, get_email_thread, lookup_entity)")

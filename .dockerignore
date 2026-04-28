@@ -1,0 +1,38 @@
+# Keep the build context small + fast. None of these need to land in the image.
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Git + CI
+.git/
+.gitignore
+.github/
+
+# Docs (read on the host, not needed inside the container)
+*.md
+!frontend/**/*.md
+!app/**/*.md
+
+# Local notes / scratch (also gitignored)
+learn.md
+prompts/
+
+# Runtime data — bind-mounted at runtime, must NOT bake into the image
+data/
+
+# Claude / AI tooling caches
+.claude/

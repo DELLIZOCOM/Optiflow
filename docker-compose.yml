@@ -1,0 +1,49 @@
+# =============================================================================
+# OptiFlow AI — single-service compose file for portable testing.
+#
+# What this gives you:
+#   * One image, one container — the FastAPI server serves both the JSON API
+#     (POST /ask, GET /setup/*, etc.) and the static frontend (HTML/JS/CSS)
+#     from the same process. There is no separate "frontend container" to run;
+#     OptiFlow has no build step for the UI.
+#   * Bind-mount of ./data so encrypted credentials, schema snapshots,
+#     session history, and the email DB persist across `docker compose down`
+#     and travel with the repo when you copy it to another machine.
+#   * Sensible defaults: auto-restart on crash, healthcheck against
+#     /setup/status, single worker (the IMAP/Outlook coordinators hold
+#     per-process state and don't survive multi-worker out of the box).
+#
+# To wipe state and start over (without rebuilding the image):
+#   docker compose down
+#   rm -rf data/cache data/config/sources data/config/email \
+#          data/sources data/knowledge
+#   docker compose up -d
+#
+# To rebuild after editing app code:
+#   docker compose up -d --build
+# =============================================================================
+
+services:
+  optiflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: optiflow-ai:local
+    container_name: optiflow
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Encrypted creds + AI key + email config + schema cache + session DB.
+      # ./data is the ONLY thing that needs to persist between runs.
+      - ./data:/app/data
+    environment:
+      # Nothing runtime-required by default. Add overrides here if you need to.
+      # TZ=Asia/Kolkata               # uncomment to align the agent's "today" to your TZ
+      PYTHONUNBUFFERED: "1"
+    # Lets the container reach a SQL Server / IMAP host running on the same
+    # machine via `host.docker.internal`. Useful on macOS + Windows; on Linux
+    # add `--add-host=host.docker.internal:host-gateway` (already inferred by
+    # Compose v2 in most cases).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

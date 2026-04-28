@@ -22,6 +22,8 @@
 16. [Config Files Reference](#16-config-files-reference)
 17. [Dependencies](#17-dependencies)
 18. [Resetting & Starting Over](#18-resetting--starting-over)
+19. [Recent Changes (April 2026)](#19-recent-changes-april-2026)
+20. [Recent Changes (April 28, 2026)](#20-recent-changes-april-28-2026)
 
 ---
 
@@ -34,11 +36,16 @@ OptiFlow AI is an autonomous, conversational data analyst. It connects to your S
 ### What it does
 
 - Connects to SQL Server (Microsoft MSSQL), with PostgreSQL and MySQL stubs
+- Connects to **company email** via Microsoft Graph (Outlook / M365) **or** generic IMAP (GoDaddy Workspace, Zoho, FastMail, cPanel, on-prem Postfix/Dovecot, etc.) — at most one provider active at a time
 - Discovers your schema automatically — tables, columns, data types, row counts, key relationships
 - Builds a semantic map of your database (column roles, table types, FK relationships)
-- Lets an AI agent autonomously plan and execute queries to answer your questions
+- Indexes ingested email into SQLite + FTS5 with **conversation-grouped search and 30-day time-decay ranking**
+- Maintains an **entity-resolution layer** (canonical contacts ↔ all known email addresses), auto-populated from inbound mail
+- Lets an AI agent autonomously plan and execute queries — **across both DB and email in a single turn** — to answer your questions
+- Renders **charts** when the user asks for a visualization (the agent calls a `render_chart` tool with the rows it already retrieved)
 - Streams the agent's reasoning and actions live as it works
 - Retains conversation history within a session so you can ask follow-ups
+- Caches the system prompt + tool definitions on the Anthropic API for ~60–80% input-token savings across the ReAct loop with **zero quality impact**
 
 ### What it does NOT do
 
@@ -1623,4 +1630,205 @@ Contract: **correct answer or an explicit error** — never a blank response.
 
 ---
 
-*Last updated: 2026-04-17*
+## 20. Recent Changes (April 28, 2026)
+
+A second hardening pass after §19. Adds multi-provider email, entity resolution, charts, prompt caching, agnosticization of the agent, and a stack of UI/reliability fixes. Live and committed (merge `032aa74` into `main`).
+
+### 20.1 IMAP email source — alongside Outlook
+
+**Problem:** Outlook/Microsoft 365 was the only supported email provider. Companies on GoDaddy Workspace, Zoho, FastMail, cPanel, Hostinger, or on-prem Postfix/Dovecot had no path.
+
+**Fix:** new `app/sources/email/imap/` package mirroring the Outlook package shape:
+
+| File | Role |
+|------|------|
+| `client.py` | Async wrapper over stdlib `imaplib` (offloaded to a thread executor). Connect, select, UID search, batched FETCH. |
+| `ingest.py` | `IMAPCoordinator` — one `asyncio.Task` + `asyncio.Event` per mailbox. Manual `sync_now` skips the 5-min wait by setting the event. Runtime `add_mailbox` / `remove_mailbox`. |
+| `mapper.py` | RFC 822 → EmailStore row, using stdlib `email` + `email.policy.default`. HTML-to-text fallback when no plain part. |
+| `source.py` | `IMAPSource` implementing the `EmailSource` protocol. |
+
+Mutually exclusive with Outlook — connecting one provider deletes the other's config. Both write into the same `EmailStore`, so the agent doesn't care which connector filled the cache.
+
+### 20.2 IMAP FETCH parser fix — silent zero-stored bug
+
+**Problem:** users reported "Active mailbox, last sync 1 min ago, 0 messages stored" with no error. Root cause: the FETCH-response parser searched the preamble for `" UID "` (with a leading space). The actual preamble is `1 (UID 4 BODY[] {3456}` — there's an opening paren right before `UID`, not a space. The marker never matched, every body was silently dropped, and the coordinator marked the sync "successful" with `delta_link='0'` and `last_error=None`.
+
+**Fix:** bytes-mode regex `\bUID\s+(\d+)` that handles three response shapes (preamble UID, trailing-bytes UID, neither → positional fallback). All three now verified. FETCH command also asks for `(UID BODY.PEEK[])` explicitly so the UID always lands in the preamble. Sync loop now logs `found=N fetched=M stored=K failed=F` and surfaces an honest `last_error` when bodies couldn't be parsed.
+
+### 20.3 Multi-provider setup wizard + dedicated `/email` page
+
+- Setup wizard step 5 replaces the single Outlook form with a 3-card provider picker (Outlook / GoDaddy / Generic IMAP) plus matching subforms (Azure checklist for Outlook; host/port/SSL + per-mailbox-row editor for IMAP).
+- New enterprise `/email` management page with: sticky status bar showing live state + cadence label ("auto-syncs every 5 min"), per-mailbox table with **Sync now / Remove** buttons, inline **Add mailbox** form (IMAP), recent-activity feed (last 20 messages, polls every 60s), per-mailbox status badges (Active / Syncing / Error / Disabled), and a Disconnect → optionally-purge-cache flow.
+- Status payload (`GET /setup/email/status`) now provider-aware: `{ provider, host, port, use_ssl, imap_provider, mailbox_details: [...], configured_mailboxes: [...] }`.
+
+### 20.4 Entity resolution — canonical contacts
+
+Schema added to `EmailStore` (migration v2 via `PRAGMA user_version`):
+
+```sql
+CREATE TABLE entities (
+    entity_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind             TEXT NOT NULL DEFAULT 'unknown',  -- customer | vendor | employee | unknown
+    display_name     TEXT,
+    canonical_email  TEXT NOT NULL,
+    company          TEXT,
+    notes            TEXT,
+    source           TEXT NOT NULL,                    -- 'manual' | 'email' | 'db:<table>'
+    source_pk        TEXT,                             -- foreign key in source DB if linked
+    confidence       REAL NOT NULL DEFAULT 1.0,
+    first_seen       REAL NOT NULL,
+    last_seen        REAL NOT NULL,
+    UNIQUE(kind, canonical_email)
+);
+CREATE TABLE entity_emails (
+    entity_id      INTEGER NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE,
+    email_address  TEXT NOT NULL,
+    is_canonical   INTEGER NOT NULL DEFAULT 0,
+    seen_count     INTEGER NOT NULL DEFAULT 1,
+    last_seen      REAL NOT NULL,
+    PRIMARY KEY (entity_id, email_address)
+);
+```
+
+**Auto-discovery:** runs after every successful IMAP sync, scans the last 24h of mail, upserts each sender as `kind='unknown'` `confidence=0.5`. Idempotent on `(kind, canonical_email)` — re-running just bumps `seen_count`. Skips own mailboxes.
+
+**Manual upsert:** `POST /entities` with `kind='customer'` `confidence=1.0`. Confidence is monotonically maxed — re-discovering a confirmed contact never demotes them.
+
+**Storage decision** (rejected alternatives explained): NOT in the system prompt (token-cost scales with entity count), NOT in a `.md` file (no indexing, re-parsed every request, same token problem). The SQLite table indexed by `canonical_email` and `display_name` keeps lookups sub-millisecond up to millions of rows.
+
+### 20.5 `lookup_entity` tool
+
+New email-stack tool the agent calls to resolve a name or email into a canonical entity record with **all** known aliases:
+
+```
+lookup_entity("Acme Corp")
+→ { found: true, entity: {
+      entity_id: 42, kind: "customer",
+      display_name: "Acme Corp", company: "Acme Corp Ltd.",
+      emails: ["billing@acme.io", "support@acme.io"],
+      confidence: 1.0
+  }}
+```
+
+The system prompt now nudges the agent to call this **first** when the user names a contact, then pass the address(es) to `search_emails(sender=...)` — catching aliases the user may not even know about.
+
+### 20.6 Conversation-grouped search + time decay
+
+`EmailStore.search()` now does two-phase ranking:
+
+1. **Candidate pool** — pull the top 5×limit BM25 hits matching all filters (mailbox, sender, date_range, etc.).
+2. **Re-rank in Python** — apply `0.4 + 0.6 × exp(-age/half_life × ln 2)` with `half_life = 30 days`. Floor of 0.4 means decay never throws away a relevant ancient result, just deprioritizes it. Optionally collapse by `conversation_id` so one thread = one hit, with `thread_message_count` and `thread_last_received` attached.
+
+`group_by_conversation=True` is now the default. Set `False` for the old "every message" behavior. Verified: a recent 3-message thread outranks a 400-day-old single-message thread on the same keyword.
+
+### 20.7 Chart pipeline — `render_chart` tool
+
+The chart toggle was a stub before — frontend sent `visualise=true` but the orchestrator ignored it. Now end-to-end:
+
+- `app/tools/charts.py::RenderChartTool` — strict spec validator (chart type ∈ `bar/line/area/pie/doughnut/table`, ≤200 rows, x/y columns must exist in the supplied rows, title ≤120 chars, etc.) matching exactly what `frontend/js/chat.js::renderChartCard` expects.
+- `AgentOrchestrator` filters `render_chart` out of the tool list when `visualise=False` so plain Q&A is never tempted into spurious chart calls. When `visualise=True`, a "Visualisation Mode" addendum is appended to the system prompt: query the data → call `render_chart` once with the rows → write a 1–3 sentence text summary.
+- When the LLM calls `render_chart`, the orchestrator emits an SSE `{"type": "chart", "spec": {...}}` event before passing through to the tool's `execute()`, which returns a confirmation so the LLM continues to its short text answer.
+
+### 20.8 Anthropic prompt caching — cost reduction without quality loss
+
+The system prompt + tool definitions are large and **byte-identical** across every iteration of the ReAct loop (3–10 LLM calls per question) and across turns within a 5-minute window. Tagging them with `cache_control: {"type": "ephemeral"}` means subsequent calls pay ~10% of input cost on those tokens.
+
+Implementation in `app/ai/client.py`:
+
+```python
+cached_system = _with_system_cache(system)        # system → list[{type: text, ..., cache_control}]
+cached_tools  = _with_tool_cache(tools)           # last tool gets cache_control (covers whole array)
+```
+
+Realistic savings on a typical 5-iteration question: **60–80% off the total input bill**. Visible in the server log on every call:
+
+```
+[AIClient] tokens: in=1351 cache_read=4465 cache_write=0 out=463 (saved ~77% on cached portion)
+```
+
+**Quality impact: zero.** The bytes the model sees are identical; only billing changes. Cache hits/writes show in `usage.cache_read_input_tokens` and `usage.cache_creation_input_tokens`.
+
+### 20.9 Provider-agnostic agent
+
+The agent layer no longer hard-codes any vendor. The static base `SYSTEM_PROMPT` mentions "SQL database" and "email mailbox" generically — never "Outlook," "Microsoft Graph," "GoDaddy," "MSSQL," or "SQL Server" by name. Per-source guidance is composed at request time by calling each registered source's own `get_system_prompt_section()`. Adding a new source type (Gmail, Oracle, SQLite, etc.) only needs the new source class — the orchestrator does not change.
+
+The follow-up-turn hint also no longer assumes a database-first flow ("skip list_tables") — it correctly handles email-first sessions.
+
+### 20.10 Tool-registry self-heal — fixes "Unknown tool: list_tables" after reset
+
+**Problem:** `/setup/reset` cleared the entire `ToolRegistry`. After re-adding a database via the wizard, `_reload_source` only re-registered the **source** — never re-registered the **tools**. When email got reconnected, `register_email_tools` added back its 4 tools, and that was all the registry had. The agent's system prompt advertised the database (because the source was back in source_registry) but the LLM tried `list_tables` and got `Unknown tool`.
+
+**Fix:** new `register_core_tools(tool_registry, source_registry)` helper in `app/main.py`. Idempotent (overwrites by name). Called from `build_tool_registry()` on startup, from `_reload_source` after a new source is added, and right after `_tool_registry.clear()` in the reset path. Registry never sits in a half-broken state.
+
+### 20.11 Root redirect — fix "reset → restart → blank chat"
+
+After a reset followed by a server restart, the user landed on `/` (chat.html) with nothing configured and no obvious next step. Now `GET /` checks for AI config + at least one source (database OR email). If anything's missing, it returns a 303 to `/setup`. Verified all four states: nothing configured / AI only / AI + email / AI + database.
+
+### 20.12 SSE reader hardened (frontend)
+
+`_readSSE` in `frontend/js/chat.js` is now RFC-flavored: handles CRLF, multi-line `data:` frames, comment-line keep-alive pings (`: keepalive`), decoder flush on close. Malformed JSON is logged once and skipped instead of crashing the stream. HTTP errors surface the server's `detail`/`error` body instead of a generic "Connection error."
+
+### 20.13 Sticky-bottom autoscroll
+
+Streaming chunks no longer yank the user back down when they've scrolled up to read earlier output. `chatArea.scroll` listener tracks `_autoStickBottom`; `scrollBottom()` honors it unless `force: true` (used after the user themselves sends a message).
+
+### 20.14 UI polish — sidebar/header differentiation, trace block, typography
+
+- Sidebar uses `--bg-sidebar` (`#0b1220`, near-black); top header uses `--bg-header` (`#1b2538`, lighter slate). A 1px hairline `--seam` rule on the boundary so the two surfaces no longer optically merge into one slab. Subtle drop shadow under the header so it floats above the chat area.
+- Trace block redesigned to read as a "thinking notebook," not a code window: tool labels in UI font (not monospace), only the SQL itself stays monospace behind a "View SQL" disclosure, soft indigo gradient header (was code-grey), 2px accent rail per thinking step, real blinking caret block (not `▌`), 13.5px / 1.7 line-height in `--fg-primary`.
+- Inter font added as the primary UI face (Google Fonts, with system-font fallbacks). `--fg-faint` lifted from `#9ca3af` to `#7d8595` for better contrast.
+- Subtle radial gradient behind the chat area gives cards a surface to sit on. AI message cards bumped to 22px / 26px padding, 16px corner radius, inverse-gradient on user bubbles.
+
+### 20.15 Storage / migration safety
+
+- `EmailStore` schema migration runs on every boot via `PRAGMA user_version`. v1 → v2 adds the entity tables. **Idempotent:** existing DBs upgrade in place, mailboxes + emails preserved. Verified on the live `data/cache/email.db`.
+- `purge_all()` now wipes `entities` + `entity_emails` alongside `emails` so a Disconnect-with-purge is fully clean.
+- `save_imap_config` checks `is_encrypted()` before re-encrypting passwords, so partial round-trips (load → mutate one mailbox → save) don't double-encrypt the others.
+
+### 20.16 New API surface
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/setup/email/sync_now` | Manual poll trigger (IMAP fires the wake event; Outlook returns no-op note) |
+| `POST` | `/setup/email/imap/mailboxes` | Add one IMAP mailbox at runtime (validates login, persists, spawns poll task) |
+| `DELETE` | `/setup/email/imap/mailboxes` | Stop polling a mailbox; optional `purge_cache` |
+| `GET` | `/setup/email/recent_messages` | Activity feed for the dashboard |
+| `GET` | `/entities` | List entities, filtered by kind / min_confidence / limit / offset |
+| `GET` | `/entities/{id}` | Fetch one entity with all addresses |
+| `POST` | `/entities` | Upsert (idempotent on `(kind, canonical_email)`) |
+| `PATCH` | `/entities/{id}` | Partial update (promote kind, edit notes, etc.) |
+| `DELETE` | `/entities/{id}` | Hard delete; cascades to `entity_emails` |
+| `POST` | `/entities/discover` | Manual one-shot discovery pass over recent mail |
+
+Total app routes after this pass: **42**.
+
+### 20.17 Files touched in this pass
+
+**New:**
+- `app/sources/email/imap/{__init__,client,ingest,mapper,source}.py` — IMAP package
+- `app/tools/charts.py` — `RenderChartTool`
+- `frontend/css/email.css`, `frontend/js/email.js`, `frontend/pages/email.html` — `/email` management page
+
+**Changed (notable):**
+- `app/agent/orchestrator.py` — provider-agnostic `_build_system_prompt`, chart-mode prompt addendum, `render_chart` filter + SSE intercept, source-agnostic follow-up hint
+- `app/agent/prompts.py` — full rewrite of `SYSTEM_PROMPT` to be vendor-neutral
+- `app/ai/client.py` — `_with_system_cache`, `_with_tool_cache`, `_log_cache_usage`
+- `app/main.py` — `register_core_tools` helper, `_maybe_start_imap_source`, root redirect
+- `app/routes/email.py` — provider-aware status, IMAP routes, entity routes, sync_now
+- `app/routes/setup.py` — re-seed core tools after reset; tool-registry healing on `_reload_source`
+- `app/sources/email/store.py` — migration v2, entity CRUD, `auto_discover_entities_from_recent`, conversation-grouped search with time decay, `recent_emails`, `set_mailbox_status`, `delete_mailbox`
+- `app/tools/email.py` — `LookupEntityTool`, group-by-conversation flag in `search_emails`, thread metadata in summaries
+- `frontend/css/chat.css` — sidebar/header palette, trace redesign, typography
+- `frontend/js/chat.js` — RFC-flavored SSE reader, sticky-bottom autoscroll
+- `frontend/pages/chat.html` — Inter font preconnect, bumped cache-bust query strings
+
+### 20.18 What's deliberately NOT in this pass (deferred)
+
+- **Hybrid retrieval** (BM25 + dense embeddings + RRF). Worth doing past ~100k messages or when semantic search becomes a real need.
+- **Cross-encoder reranker.** Marginal gains over hybrid; defer.
+- **Local LLM support.** Researched (Qwen3-30B-A3B, GLM-4.5-Air, etc.); not implemented because the agent loop is currently hard-coupled to Anthropic streaming + tool-use. Would need an OpenAI-compatible adapter + structured-output guidance.
+- **Outlook manual sync_now.** IMAP has it via wake events; Outlook still relies on its own 10-min Graph delta cadence. Endpoint accepts the request and returns a no-op note for transparency.
+
+---
+
+*Last updated: 2026-04-28*

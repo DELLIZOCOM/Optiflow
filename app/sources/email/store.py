@@ -408,12 +408,24 @@ class EmailStore:
         # surface items BM25 alone wouldn't have put in the top-N.
         pool_size = max(int(limit) * 5, 25)
 
+        # Two preview channels:
+        #   * `preview`    — BM25 snippet (~12 tokens around the match), useful
+        #                    for the dashboard/UI which highlights the hit.
+        #   * `body_head`  — first 1500 chars of the actual body, used by the
+        #                    agent. This is the fix for "snippet trap"
+        #                    hallucinations where the LLM saw only the opening
+        #                    of an automated alert and missed the secondary
+        #                    payload appended further down. We also return
+        #                    body_full_length so the LLM can SEE that there's
+        #                    more to read (use get_email for the full body).
         sql = """
             SELECT e.id, e.mailbox_id, e.account_email, e.subject,
                    e.from_name, e.from_email, e.to_emails, e.sent_at,
                    e.received_at, e.has_attachments, e.attachment_names, e.folder,
                    e.conversation_id,
                    snippet(emails_fts, 4, '<mark>', '</mark>', '…', 12) AS preview,
+                   substr(e.body_text, 1, 1500)               AS body_head,
+                   length(e.body_text)                         AS body_full_length,
                    bm25(emails_fts) AS score
             FROM   emails_fts
             JOIN   emails e ON e.id = emails_fts.rowid

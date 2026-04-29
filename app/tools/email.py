@@ -25,19 +25,35 @@ def _fmt_ts(ts: Optional[float]) -> str:
 
 
 def _summarize_row(r: dict) -> dict:
-    """Trim an email row for compact tool output."""
+    """
+    Trim an email row for compact tool output. Includes:
+      * `preview`          — BM25 snippet (highlighted), good for "what matched"
+      * `body_head`        — first 1500 chars of body, whitespace-normalized
+      * `body_truncated`   — True if the full body is longer than what we returned
+      * `body_full_length` — total body length so the LLM can decide whether
+                             to call get_email for the rest (snippet-trap
+                             prevention: the model sees that there's more)
+    """
+    body_head = (r.get("body_head") or "")
+    if body_head:
+        body_head = " ".join(body_head.split())
+    body_full_len = int(r.get("body_full_length") or len(body_head) or 0)
+
     out = {
-        "id":               r.get("id"),
-        "mailbox":          r.get("account_email"),
-        "subject":          r.get("subject") or "(no subject)",
-        "from":             f"{r.get('from_name') or ''} <{r.get('from_email') or ''}>".strip(),
-        "to":               r.get("to_emails") or [],
-        "sent_at":          _fmt_ts(r.get("sent_at")),
-        "folder":           r.get("folder"),
-        "has_attachments":  bool(r.get("has_attachments")),
-        "attachments":      r.get("attachment_names") or [],
-        "conversation_id":  r.get("conversation_id"),
-        "preview":          r.get("preview"),
+        "id":                r.get("id"),
+        "mailbox":           r.get("account_email"),
+        "subject":           r.get("subject") or "(no subject)",
+        "from":              f"{r.get('from_name') or ''} <{r.get('from_email') or ''}>".strip(),
+        "to":                r.get("to_emails") or [],
+        "sent_at":           _fmt_ts(r.get("sent_at")),
+        "folder":            r.get("folder"),
+        "has_attachments":   bool(r.get("has_attachments")),
+        "attachments":       r.get("attachment_names") or [],
+        "conversation_id":   r.get("conversation_id"),
+        "preview":           r.get("preview"),
+        "body_head":         body_head,
+        "body_full_length":  body_full_len,
+        "body_truncated":    body_full_len > len(body_head),
     }
     # When search() runs in conversation-grouped mode (the default), each row
     # represents a whole thread. Surface thread size + last-received so the
@@ -93,6 +109,12 @@ class SearchEmailsTool(BaseTool):
         "boosting (recent messages outrank old ones at similar relevance). Results "
         "are grouped by conversation by default — one row per thread, with "
         "thread_message_count showing how many messages are in the thread. "
+        "Each result includes `preview` (BM25 highlighted snippet, ~12 tokens), "
+        "`body_head` (first 1500 chars of the body), `body_full_length`, and "
+        "`body_truncated`. **If `body_truncated` is true and you need to extract "
+        "specific values (IDs, codes, error variables, line items) — call "
+        "`get_email(email_id)` to read the full body before answering.** Snippets "
+        "and previews are for relevance, not for verbatim extraction. "
         "Provide 2-6 keyword variants (synonyms, abbreviations, exact IDs). "
         "Optional filters: mailbox (exact address), sender (name or address substring), "
         "recipient (substring), date_range ('last_7_days' | 'last_30_days' | "

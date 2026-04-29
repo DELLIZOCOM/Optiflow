@@ -39,15 +39,33 @@ def init_router(source_registry, tool_registry):
 
 
 def _source_summary(source) -> dict:
-    index = source.get_table_index()
+    """
+    One row in the /sources listing. Provider-tolerant — only database
+    sources implement `schema_discovered()`; email sources have nothing
+    to "discover" in the DB-schema sense, so we default to True for them
+    rather than crashing the whole listing.
+    """
+    try:
+        index = source.get_table_index() or ""
+    except Exception:
+        index = ""
     table_count = len([l for l in index.splitlines() if l.strip()]) if index else 0
+
+    schema_fn = getattr(source, "schema_discovered", None)
+    schema_done = True
+    if callable(schema_fn):
+        try:
+            schema_done = bool(schema_fn())
+        except Exception:
+            schema_done = False
+
     return {
-        "name":             source.name,
-        "type":             source.source_type,
-        "description":      source.description,
-        "database":         source.get_database_name(),
-        "table_count":      table_count,
-        "schema_discovered": source.schema_discovered(),
+        "name":              source.name,
+        "type":              source.source_type,
+        "description":       getattr(source, "description", "") or "",
+        "database":          source.get_database_name(),
+        "table_count":       table_count,
+        "schema_discovered": schema_done,
     }
 
 
